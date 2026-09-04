@@ -1,0 +1,34 @@
+{
+  "summary": "Full backend + frontend regression for Farm Feed Withdrawal Timer new features (landing page, removed in-app QR scanner, delay control, multi-farm arming). Backend: 18/18 pytest cases pass sequentially (11 existing + 7 new). New coverage: GET /api/settings exposes my_farms; PUT /api/settings updates my_farms and re-arms; manual /api/schedule/manual anchor timings incl. overnight rollover (5:00 catch => 23:00 previous-day auger); /api/schedule/delay +120 shifts shed1 catch 07:00->09:00, auger 01:00->03:00, second +120 stays at +2h (no compounding), delay 0 restores original; GET /api/schedule/latest exposes delay_min/farms/note/base; GET /api/pairing?app_url=... returns https-web /pair?code=NNNNNN payload + qr_data_url; POST /api/pairing/claim wrong-code 400, correct code paired; alarms active/ack/escalate/log work end-to-end; multi-farm arming: uploaded CSV with FarmA + FarmB armed only FarmA when my_farms=['FarmA'], then re-armed both after my_farms=['FarmA','FarmB']. Frontend: GET / redirects to /landing; landing-page + shot-dashboard + shot-phone + cta-control-centre + cta-phone-app all present and cta-control-centre navigates to /dashboard. Dashboard @1360: upload-card + times-table + delay-bar + my-farms-panel all present; manual-shed-input/manual-time-input/manual-add-button add sheds 1/7:00, 2/7:30; generate-schedule-button produces shed-row-1 with 07:00 catch and 01:00 auger (05:00 lines); delay-2h flips delay-value to '+2h delay' and updates shed-row-1 to catch 09:00 / auger 03:00; delay-clear restores 'On time'; add-farm-input + add-farm-button + d-save-farms save 'Double B' farm chip successfully. Mobile @390: pairing-card renders settings-qr + pairing-code-input + pair-button; NO scan-qr-button exists (removed as required); entering current code + pair-button successfully pairs (API paired=True, device_name='My Phone'); my-farms-card + offsets-card + escalation-card + save-settings-button all functional. Auto-pair: /pair?code=<current> renders pair-screen with pair-status 'Paired! Opening your schedule\u2026' and pairs via API before redirecting to /(tabs)/home which shows the Paired chip and today's schedule. No red screens, no console errors, all testIDs resolve. Deprecated packages detected: expo-camera still listed in package.json even though the in-app scanner was removed (unused dependency).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "package.json", "issue": "expo-camera ~57.0.4 is still declared as a dependency but the in-app QR scanner was removed from settings.tsx. Consider removing the unused dependency to shrink the web bundle. Reference: /app/frontend/package.json:23"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: remove the unused `expo-camera` dependency from /app/frontend/package.json now that the in-app QR scanner has been deleted."
+  ],
+  "critical_code_review_comments": [
+    "server.py get_settings_doc merges DEFAULT_SETTINGS on top of the DB doc, so a manual DB deletion of a key gets silently re-defaulted; acceptable but worth documenting.",
+    "delete_schedule endpoint only flips active=false and leaves alarms pending in DB; /api/alarms/active only queries the currently-active schedule so no user-visible bug, but old alarm docs accumulate over time. Consider a cleanup pass.",
+    "AlarmOverlay is a global full-screen modal fired when any pending alarm's fire_at_utc <= now; tests must acknowledge/click alarm-done-button (or seed schedules with future times) before asserting non-overlay UI. Confirmed working as designed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_features.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Tests seed ephemeral manual schedules + pairing docs via public API only; no manual DB inserts.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend: 18/18 pytest cases pass when run sequentially (pytest -o addopts='' backend/tests/). Note: default pytest.ini enables xdist loadscope; the multi-farm arming test shares the singleton active-schedule + settings docs with the delay test, so parallel runs can race (both classes hit /api/schedule/manual and /api/settings). If you re-run in parallel, add `-o addopts=''` to force sequential. Frontend: landing page + dashboard + mobile settings + auto-pair all verified. scan-qr-button has been fully removed from settings.tsx. AlarmOverlay is global \u2014 loop-click [data-testid=alarm-done-button] before asserting non-overlay UI. Fresh pairing code always available via POST /api/pairing/regenerate.",
+  "rca_of_issue": "N/A \u2014 no functional issues found. Only cosmetic follow-up: unused expo-camera dependency remains in package.json."
+}

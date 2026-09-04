@@ -1,23 +1,17 @@
 import { useEffect, useState } from "react";
-import { Linking, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, qk, fetchPairing, type PairingStatus, type Schedule, type Settings } from "@/src/api";
-import { fmtMins, Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
+import { Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
 import { Icon } from "@/src/components/Icon";
 import { getDeviceId, getDeviceName } from "@/src/utils/device";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
-function extractCode(raw: string): string {
-  const m = raw.match(/code=(\d{4,8})/);
-  if (m) return m[1];
-  const digits = raw.replace(/\D/g, "");
-  return digits.slice(0, 6);
-}
 
 export default function SettingsScreen() {
   const { colors } = useTheme();
@@ -42,7 +36,6 @@ export default function SettingsScreen() {
 
   const [code, setCode] = useState("");
   const [pairError, setPairError] = useState<string | null>(null);
-  const [scanOpen, setScanOpen] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const [local, setLocal] = useState<Settings | null>(null);
@@ -83,12 +76,6 @@ export default function SettingsScreen() {
   const set = (patch: Partial<Settings>) => {
     setLocal((prev) => (prev ? { ...prev, ...patch } : prev));
     setSaved(false);
-  };
-
-  const onScanned = (value: string) => {
-    setScanOpen(false);
-    const c = extractCode(value);
-    if (c) claim.mutate(c);
   };
 
   return (
@@ -169,15 +156,6 @@ export default function SettingsScreen() {
                   disabled={code.length < 4 || claim.isPending}
                   testID="pair-button"
                 />
-                {Platform.OS !== "web" ? (
-                  <PrimaryButton
-                    label="Scan QR instead"
-                    icon="qrcode-scan"
-                    tone="ghost"
-                    onPress={() => setScanOpen(true)}
-                    testID="scan-qr-button"
-                  />
-                ) : null}
               </View>
             )}
           </Card>
@@ -279,69 +257,7 @@ export default function SettingsScreen() {
 
         <Text style={styles.tz}>Times shown in {settings?.timezone ?? "local"} timezone</Text>
       </KeyboardAwareScrollView>
-
-      {scanOpen ? <QRScanner onScanned={onScanned} onClose={() => setScanOpen(false)} /> : null}
     </View>
-  );
-}
-
-function QRScanner({ onScanned, onClose }: { onScanned: (v: string) => void; onClose: () => void }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const [Camera, setCamera] = useState<any>(null);
-  const [permission, setPermission] = useState<any>(null);
-  const [handled, setHandled] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      const mod = await import("expo-camera");
-      setCamera(() => mod.CameraView);
-      const perm = await mod.getCameraPermissionsAsync();
-      if (perm.status !== "granted" && perm.canAskAgain) {
-        const req = await mod.requestCameraPermissionsAsync();
-        setPermission(req);
-      } else {
-        setPermission(perm);
-      }
-    })();
-  }, []);
-
-  const granted = permission?.status === "granted";
-
-  return (
-    <Modal visible transparent={false} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scanRoot}>
-        {granted && Camera ? (
-          <Camera
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={(e: any) => {
-              if (handled) return;
-              setHandled(true);
-              onScanned(e?.data ?? "");
-            }}
-          />
-        ) : (
-          <View style={styles.scanCenter}>
-            <Icon name="camera-off" size={48} color={colors.muted} />
-            <Text style={styles.scanMsg}>
-              {permission && !permission.granted && !permission.canAskAgain
-                ? "Camera access is blocked. Open Settings to allow it, or enter the code manually."
-                : "Requesting camera permission…"}
-            </Text>
-            {permission && !permission.canAskAgain ? (
-              <PrimaryButton label="Open Settings" icon="cog" onPress={() => Linking.openSettings()} />
-            ) : null}
-          </View>
-        )}
-        <View style={styles.scanFrame} pointerEvents="none" />
-        <Pressable style={styles.scanClose} onPress={onClose} testID="scan-close">
-          <Icon name="close" size={22} color={colors.onSurface} />
-          <Text style={styles.scanCloseText}>Cancel</Text>
-        </Pressable>
-      </View>
-    </Modal>
   );
 }
 
@@ -387,31 +303,4 @@ const useStyles = makeStyles((colors) => ({
   divider: { height: 1, backgroundColor: colors.divider, marginVertical: spacing.xs },
   note: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, marginTop: spacing.sm, lineHeight: 17 },
   tz: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, textAlign: "center" },
-
-  scanRoot: { flex: 1, backgroundColor: "#000000" },
-  scanCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, padding: spacing.xl },
-  scanMsg: { fontFamily: fonts.text, color: colors.onSurface, fontSize: 15, textAlign: "center", lineHeight: 22 },
-  scanFrame: {
-    position: "absolute",
-    top: "30%",
-    left: "15%",
-    width: "70%",
-    height: "40%",
-    borderWidth: 3,
-    borderColor: colors.brandPrimary,
-    borderRadius: radius.lg,
-  },
-  scanClose: {
-    position: "absolute",
-    bottom: 48,
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.surfaceSecondary,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderRadius: radius.pill,
-  },
-  scanCloseText: { fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 15 },
 }));

@@ -9,18 +9,14 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.augeralerthub.i4o19w",
-      "infoPlist": {
-        "NSCameraUsageDescription": "Scan the pairing QR to link this phone"
-      }
+      "bundleIdentifier": "com.emergent.augeralerthub.i4o19w"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.emergent.augeralerthub.i4o19w",
-      "permissions": ["CAMERA"]
+      "package": "com.emergent.augeralerthub.i4o19w"
     },
     "web": {
       "bundler": "metro",
@@ -43,12 +39,6 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-status-bar",
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Scan the pairing QR to link this phone"
-        }
-      ],
       "@react-native-vector-icons/material-design-icons"
     ],
     "experiments": {

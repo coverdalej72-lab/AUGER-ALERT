@@ -1,11 +1,9 @@
 import { Redirect } from "expo-router";
-import { Platform, useWindowDimensions } from "react-native";
+import { Platform } from "react-native";
 
-// Responsive entry: a wide screen (a PC browser) opens the desktop control
-// centre; a phone-sized screen (or any native device) opens the mobile
-// companion.
+// Entry: the web link shows the landing page (to show people); native devices
+// go straight into the phone companion.
 export default function Index() {
-  const { width } = useWindowDimensions();
-  const isDesktop = Platform.OS === "web" && width >= 900;
-  return <Redirect href={isDesktop ? "/dashboard" : "/(tabs)/home"} />;
+  if (Platform.OS === "web") return <Redirect href="/landing" />;
+  return <Redirect href="/(tabs)/home" />;
 }
