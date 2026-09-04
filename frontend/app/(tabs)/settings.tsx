@@ -1,0 +1,382 @@
+import { useEffect, useState } from "react";
+import { Linking, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { api, qk, type PairingStatus, type Settings } from "@/src/api";
+import { fmtMins, Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
+import { Icon } from "@/src/components/Icon";
+import { getDeviceId, getDeviceName } from "@/src/utils/device";
+import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
+
+function extractCode(raw: string): string {
+  const m = raw.match(/code=(\d{4,8})/);
+  if (m) return m[1];
+  const digits = raw.replace(/\D/g, "");
+  return digits.slice(0, 6);
+}
+
+export default function SettingsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
+
+  const { data: pairing } = useQuery<PairingStatus>({
+    queryKey: qk.pairing,
+    queryFn: () => api.get("/pairing"),
+    refetchInterval: 10000,
+  });
+  const { data: settings } = useQuery<Settings>({
+    queryKey: qk.settings,
+    queryFn: () => api.get("/settings"),
+  });
+
+  const [code, setCode] = useState("");
+  const [pairError, setPairError] = useState<string | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const [local, setLocal] = useState<Settings | null>(null);
+  useEffect(() => {
+    if (settings && !local) setLocal(settings);
+  }, [settings, local]);
+
+  const claim = useMutation({
+    mutationFn: async (theCode: string) => {
+      const device_id = await getDeviceId();
+      const device_name = await getDeviceName();
+      return api.post("/pairing/claim", { code: theCode, device_id, device_name });
+    },
+    onSuccess: () => {
+      setPairError(null);
+      setCode("");
+      qc.invalidateQueries({ queryKey: qk.pairing });
+    },
+    onError: (e: Error) => setPairError(e.message),
+  });
+
+  const unpair = useMutation({
+    mutationFn: () => api.del("/pairing"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.pairing }),
+  });
+
+  const saveSettings = useMutation({
+    mutationFn: (s: Settings) => api.put("/settings", s),
+    onSuccess: () => {
+      setSaved(true);
+      qc.invalidateQueries({ queryKey: qk.settings });
+      qc.invalidateQueries({ queryKey: qk.schedule });
+      qc.invalidateQueries({ queryKey: qk.alarms });
+      setTimeout(() => setSaved(false), 2000);
+    },
+  });
+
+  const set = (patch: Partial<Settings>) => {
+    setLocal((prev) => (prev ? { ...prev, ...patch } : prev));
+    setSaved(false);
+  };
+
+  const onScanned = (value: string) => {
+    setScanOpen(false);
+    const c = extractCode(value);
+    if (c) claim.mutate(c);
+  };
+
+  return (
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <View style={styles.header}>
+        <Text style={styles.h1}>Settings</Text>
+        <Text style={styles.h2}>Pairing, offsets &amp; escalation</Text>
+      </View>
+
+      <KeyboardAwareScrollView
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing["3xl"], gap: spacing.lg }}
+        bottomOffset={20}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Pairing */}
+        <View>
+          <SectionTitle>Phone pairing</SectionTitle>
+          <Card testID="pairing-card">
+            {pairing?.paired ? (
+              <View style={{ gap: spacing.md }}>
+                <View style={styles.pairedRow}>
+                  <View style={styles.pairedIcon}>
+                    <Icon name="cellphone-check" size={26} color={colors.success} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pairedTitle}>Paired to control centre</Text>
+                    <Text style={styles.pairedSub}>{pairing.device_name || "This phone"}</Text>
+                  </View>
+                  <Pill label="Active" tone="success" icon="check" />
+                </View>
+                <PrimaryButton
+                  label="Unpair this phone"
+                  icon="link-off"
+                  tone="danger"
+                  onPress={() => unpair.mutate()}
+                  testID="unpair-button"
+                />
+              </View>
+            ) : (
+              <View style={{ gap: spacing.md }}>
+                <Text style={styles.pairHint}>
+                  Open the control centre on your PC, go to the pairing panel, and enter the 6-digit
+                  code shown there.
+                </Text>
+                <TextInput
+                  value={code}
+                  onChangeText={(t) => {
+                    setCode(t.replace(/\D/g, "").slice(0, 6));
+                    setPairError(null);
+                  }}
+                  placeholder="000000"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="number-pad"
+                  style={styles.codeInput}
+                  maxLength={6}
+                  testID="pairing-code-input"
+                />
+                {pairError ? (
+                  <Text style={styles.errText} testID="pairing-error">
+                    {pairError}
+                  </Text>
+                ) : null}
+                <PrimaryButton
+                  label={claim.isPending ? "Pairing…" : "Pair phone"}
+                  icon="cellphone-link"
+                  onPress={() => code.length >= 4 && claim.mutate(code)}
+                  disabled={code.length < 4 || claim.isPending}
+                  testID="pair-button"
+                />
+                {Platform.OS !== "web" ? (
+                  <PrimaryButton
+                    label="Scan QR instead"
+                    icon="qrcode-scan"
+                    tone="ghost"
+                    onPress={() => setScanOpen(true)}
+                    testID="scan-qr-button"
+                  />
+                ) : null}
+              </View>
+            )}
+          </Card>
+        </View>
+
+        {/* Offsets */}
+        {local ? (
+          <View>
+            <SectionTitle>Timing offsets (before catch)</SectionTitle>
+            <Card testID="offsets-card">
+              <Stepper
+                label="Cross auger OFF"
+                value={local.augers_offset_min}
+                onChange={(v) => set({ augers_offset_min: v })}
+                step={30}
+                min={0}
+                testID="augers-offset"
+              />
+              <View style={styles.divider} />
+              <Stepper
+                label="Feed lines UP"
+                value={local.lines_offset_min}
+                onChange={(v) => set({ lines_offset_min: v })}
+                step={30}
+                min={0}
+                testID="lines-offset"
+              />
+              <View style={styles.divider} />
+              <Stepper
+                label="Catch heads-up"
+                value={local.catch_headsup_min}
+                onChange={(v) => set({ catch_headsup_min: v })}
+                step={5}
+                min={0}
+                testID="headsup-offset"
+              />
+              <Text style={styles.note}>Set catch heads-up to 0m to disable the pre-catch alarm.</Text>
+            </Card>
+          </View>
+        ) : null}
+
+        {/* Escalation */}
+        {local ? (
+          <View>
+            <SectionTitle>Escalation</SectionTitle>
+            <Card testID="escalation-card">
+              <Stepper
+                label="Re-alert every"
+                value={local.realert_interval_min}
+                onChange={(v) => set({ realert_interval_min: v })}
+                step={1}
+                min={1}
+                max={60}
+                format={(v) => `${v} min`}
+                testID="realert-interval"
+              />
+              <View style={styles.divider} />
+              <Stepper
+                label="Flag critical after"
+                value={local.realert_max}
+                onChange={(v) => set({ realert_max: v })}
+                step={1}
+                min={1}
+                max={20}
+                format={(v) => `${v}×`}
+                testID="realert-max"
+              />
+              <Text style={styles.note}>
+                Unacknowledged alarms re-alert on this interval until you tap Done.
+              </Text>
+            </Card>
+          </View>
+        ) : null}
+
+        {local ? (
+          <PrimaryButton
+            label={saveSettings.isPending ? "Saving…" : saved ? "Saved ✓" : "Save settings"}
+            icon={saved ? "check" : "content-save"}
+            tone={saved ? "success" : "brand"}
+            onPress={() => saveSettings.mutate(local)}
+            disabled={saveSettings.isPending}
+            testID="save-settings-button"
+          />
+        ) : null}
+
+        <Text style={styles.tz}>Times shown in {settings?.timezone ?? "local"} timezone</Text>
+      </KeyboardAwareScrollView>
+
+      {scanOpen ? <QRScanner onScanned={onScanned} onClose={() => setScanOpen(false)} /> : null}
+    </View>
+  );
+}
+
+function QRScanner({ onScanned, onClose }: { onScanned: (v: string) => void; onClose: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [Camera, setCamera] = useState<any>(null);
+  const [permission, setPermission] = useState<any>(null);
+  const [handled, setHandled] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const mod = await import("expo-camera");
+      setCamera(() => mod.CameraView);
+      const perm = await mod.getCameraPermissionsAsync();
+      if (perm.status !== "granted" && perm.canAskAgain) {
+        const req = await mod.requestCameraPermissionsAsync();
+        setPermission(req);
+      } else {
+        setPermission(perm);
+      }
+    })();
+  }, []);
+
+  const granted = permission?.status === "granted";
+
+  return (
+    <Modal visible transparent={false} animationType="slide" onRequestClose={onClose}>
+      <View style={styles.scanRoot}>
+        {granted && Camera ? (
+          <Camera
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            onBarcodeScanned={(e: any) => {
+              if (handled) return;
+              setHandled(true);
+              onScanned(e?.data ?? "");
+            }}
+          />
+        ) : (
+          <View style={styles.scanCenter}>
+            <Icon name="camera-off" size={48} color={colors.muted} />
+            <Text style={styles.scanMsg}>
+              {permission && !permission.granted && !permission.canAskAgain
+                ? "Camera access is blocked. Open Settings to allow it, or enter the code manually."
+                : "Requesting camera permission…"}
+            </Text>
+            {permission && !permission.canAskAgain ? (
+              <PrimaryButton label="Open Settings" icon="cog" onPress={() => Linking.openSettings()} />
+            ) : null}
+          </View>
+        )}
+        <View style={styles.scanFrame} pointerEvents="none" />
+        <Pressable style={styles.scanClose} onPress={onClose} testID="scan-close">
+          <Icon name="close" size={22} color={colors.onSurface} />
+          <Text style={styles.scanCloseText}>Cancel</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
+const useStyles = makeStyles((colors) => ({
+  root: { flex: 1, backgroundColor: colors.surface },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  h1: { fontFamily: fonts.displayBold, color: colors.onSurface, fontSize: 26 },
+  h2: { fontFamily: fonts.text, color: colors.muted, fontSize: 13, marginTop: 2 },
+
+  pairedRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  pairedIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pairedTitle: { fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 16 },
+  pairedSub: { fontFamily: fonts.text, color: colors.muted, fontSize: 13, marginTop: 2 },
+  pairHint: { fontFamily: fonts.text, color: colors.onSurfaceSecondary, fontSize: 14, lineHeight: 20 },
+  codeInput: {
+    fontFamily: fonts.displayBold,
+    color: colors.onSurface,
+    fontSize: 40,
+    letterSpacing: 12,
+    textAlign: "center",
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    paddingVertical: spacing.md,
+  },
+  errText: { fontFamily: fonts.textMedium, color: colors.error, fontSize: 14, textAlign: "center" },
+  divider: { height: 1, backgroundColor: colors.divider, marginVertical: spacing.xs },
+  note: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, marginTop: spacing.sm, lineHeight: 17 },
+  tz: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, textAlign: "center" },
+
+  scanRoot: { flex: 1, backgroundColor: "#000000" },
+  scanCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, padding: spacing.xl },
+  scanMsg: { fontFamily: fonts.text, color: colors.onSurface, fontSize: 15, textAlign: "center", lineHeight: 22 },
+  scanFrame: {
+    position: "absolute",
+    top: "30%",
+    left: "15%",
+    width: "70%",
+    height: "40%",
+    borderWidth: 3,
+    borderColor: colors.brandPrimary,
+    borderRadius: radius.lg,
+  },
+  scanClose: {
+    position: "absolute",
+    bottom: 48,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+  },
+  scanCloseText: { fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 15 },
+}));

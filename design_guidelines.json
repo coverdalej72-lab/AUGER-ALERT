@@ -1,0 +1,132 @@
+{
+  "app_name": "Farm Feed Withdrawal Timer",
+  "personality": "7 Dark-First Utility",
+  "personality_one_liner": "A high-contrast, tactical command center that pierces through fatigue with absolute clarity and OLED-friendly precision.",
+  "color": {
+    "surface": "#090A0C",
+    "onSurface": "#F3F4F6",
+    "surfaceSecondary": "#14161A",
+    "onSurfaceSecondary": "#E5E7EB",
+    "surfaceTertiary": "#1F2228",
+    "onSurfaceTertiary": "#D1D5DB",
+    "surfaceInverse": "#F9FAFB",
+    "onSurfaceInverse": "#090A0C",
+    "brand": "#FF5722",
+    "brandPrimary": "#FF5722",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#FF8A65",
+    "onBrandSecondary": "#000000",
+    "brandTertiary": "#4A1806",
+    "onBrandTertiary": "#FFCCBC",
+    "success": "#10B981",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#000000",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "border": "#272A30",
+    "borderStrong": "#3F444E",
+    "divider": "#1A1C20",
+    "muted": "#9CA3AF"
+  },
+  "typography": {
+    "displayFontFamily": "Barlow Condensed",
+    "textFontFamily": "IBM Plex Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Dense and structural for the web operations table, but oversized and unmissable for mobile alarm actions.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 4,
+    "md": 8,
+    "lg": 12,
+    "pill": 999
+  },
+  "shadow_tier": "0",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": [],
+    "dont's": [
+      "No glassmorphism on operations tables or alarm screens. Solid high-contrast backgrounds only for maximum legibility."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-blur",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Desktop Dashboard (Web)",
+      "purpose": "Command center for uploading the catch sheet, configuring offsets, and viewing the per-shed times table.",
+      "states": {
+        "loading": "Skeleton rows in the data table.",
+        "empty": "Upload zone prominent in center, waiting for processor's catch sheet.",
+        "error": "Red inline banner above the table: 'File parsing failed. Please upload a valid catch sheet.' with a Retry button."
+      },
+      "layout": "Use a responsive side-by-side layout: left/main column holds the dense operations table (virtualized if needed, using IBM Plex Sans for numbers) and file upload dropzone. Right sidebar holds global settings (escalation offsets) and the QR code for mobile pairing. Use distinct semantic colors (success/warning/error) for shed status dots."
+    },
+    {
+      "name": "Mobile Alarm View",
+      "purpose": "A full-screen, unmissable alert designed to wake up and demand interaction.",
+      "states": {
+        "loading": "N/A",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "OLED-black background (surface). Oversized Barlow Condensed display typography for the shed number and action ('TURN OFF AUGER - SHED 1'). A massive, screen-width 'Done ✅' button pinned to the bottom 1/3 (thumb zone), using success color if standard, brandPrimary if escalated. No complex navigation during this state."
+    },
+    {
+      "name": "Mobile Home / Schedule",
+      "purpose": "Shows upcoming alarms and paired status.",
+      "states": {
+        "loading": "Spinner centered.",
+        "empty": "Illustration of dark alarm clock with 'Scan QR on desktop to load today's schedule.'",
+        "error": "Banner 'Connection lost to desktop' with manual refresh."
+      },
+      "layout": "Simple list of today's events sorted by time. Use stacked modules with timeline rails on the left. High-contrast timestamp (Barlow Condensed) on the left, action on the right. Stick a 'Paired to Control Center' chip at the top."
+    }
+  ],
+  "images": {
+    "desktop_pairing_background": {
+      "url": "https://images.unsplash.com/photo-1548550023-2bdb3c5beed7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODd8MHwxfHNlYXJjaHwxfHxwb3VsdHJ5JTIwZmFybXxlbnwwfHx8fDE3ODg1MTc2ODR8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Selective focus photography of a brown hen, used subtly as a dark-tinted background on the desktop login/pairing screen"
+    },
+    "mobile_empty_schedule": {
+      "url": "https://images.unsplash.com/photo-1683357352694-5dc72afdc425?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjBhbGFybSUyMGNsb2NrJTIwb3IlMjB0aW1lcnxlbnwwfHx8fDE3ODg1MTc2ODR8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Red and black alarm clock on dark background, used with a strong gradient scrim for the empty schedule state"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Implement the UI using the 7 Dark-First Utility personality: prioritize fast scanning and high contrast over aesthetic softness.",
+    "For the Mobile Alarm screen, ensure the background is #090A0C (true dark) to prevent eye strain at 1am. The typography should be oversized (Barlow Condensed), and the 'Done' button must be massive, pinned to the bottom.",
+    "For the Web Dashboard, construct a dense, professional data table. Do not use cards for the sheds; use a list/table format to allow scanning of catch time, auger off, and lines up columns. Use status colors strictly for their semantic meaning.",
+    "Do NOT use any blue, indigo, or purple. Stick to the provided orange/amber (brand) and green/red (success/error) against the dark neutral background.",
+    "Ensure the QR code on the web dashboard is highly legible against the dark theme (render it on a white or surfaceInverse card).",
+    "Avoid glassmorphism. This is a tactical operations tool; shadows and blurs create unnecessary visual noise.",
+    "For any background images, apply a heavy vertical gradient scrim (transparent to >=75% surface/surfaceInverse) so the text remains readable."
+  ]
+}
