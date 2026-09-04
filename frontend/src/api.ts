@@ -76,6 +76,7 @@ export type Schedule = {
   note?: string;
   created_at: string;
   active: boolean;
+  delay_min: number;
   sheds: ShedTiming[];
   farms: string[];
   offsets: { augers_offset_min: number; lines_offset_min: number; catch_headsup_min: number };

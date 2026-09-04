@@ -78,7 +78,10 @@ export default function HomeScreen() {
         <View>
           <Text style={styles.h1}>Withdrawal Timer</Text>
           <Text style={styles.h2}>
-            {schedule ? dateLabel(schedule.catch_date) + " · catch schedule" : "No schedule loaded"}
+            {schedule
+              ? dateLabel(schedule.catch_date) +
+                (schedule.delay_min ? ` · +${Math.round(schedule.delay_min / 60 * 10) / 10}h delayed` : " · catch schedule")
+              : "No schedule loaded"}
           </Text>
         </View>
         <Pressable testID="paired-chip">

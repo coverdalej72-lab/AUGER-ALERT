@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, API, qk, fetchPairing, type Alarm, type PairingStatus, type Schedule, type Settings } from "@/src/api";
 import { dateLabel, hhmm } from "@/src/format";
-import { Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
+import { Card, Pill, PrimaryButton, SectionTitle, Stepper, fmtMins } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
 import { Icon } from "@/src/components/Icon";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -109,6 +109,14 @@ export default function Dashboard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.pairing }),
   });
 
+  const delayMut = useMutation({
+    mutationFn: (delay_min: number) => api.put("/schedule/delay", { delay_min }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.schedule });
+      qc.invalidateQueries({ queryKey: qk.alarms });
+    },
+  });
+
   const saveSettings = useMutation({
     mutationFn: (s: Settings) => api.put("/settings", s),
     onSuccess: () => {
@@ -127,6 +135,7 @@ export default function Dashboard() {
 
   const schedule = data?.schedule ?? null;
   const alarms = data?.alarms ?? [];
+  const delay = schedule?.delay_min ?? 0;
   const myFarms = local?.my_farms ?? [];
   const byShed = new Map<string, Alarm[]>();
   alarms.forEach((a) => {
@@ -254,6 +263,36 @@ export default function Dashboard() {
           {/* Table */}
           <View>
             <SectionTitle>Per-shed withdrawal times</SectionTitle>
+            {schedule?.sheds.length ? (
+              <View style={styles.delayBar} testID="delay-bar">
+                <View style={styles.delayLeft}>
+                  <Icon name="clock-alert-outline" size={18} color={delay > 0 ? colors.warning : colors.muted} />
+                  <Text style={styles.delayLabel}>Running late?</Text>
+                  <Text style={[styles.delayValue, { color: delay > 0 ? colors.warning : colors.muted }]} testID="delay-value">
+                    {delay > 0 ? `+${fmtMins(delay)} delay` : "On time"}
+                  </Text>
+                </View>
+                <View style={styles.delayRight}>
+                  <Pressable onPress={() => delayMut.mutate(Math.max(0, delay - 30))} style={styles.delayBtn} testID="delay-minus">
+                    <Icon name="minus" size={18} color={colors.onSurface} />
+                  </Pressable>
+                  <Pressable onPress={() => delayMut.mutate(delay + 30)} style={styles.delayBtn} testID="delay-plus">
+                    <Icon name="plus" size={18} color={colors.onSurface} />
+                  </Pressable>
+                  <Pressable onPress={() => delayMut.mutate(delay + 60)} style={styles.delayChip} testID="delay-1h">
+                    <Text style={styles.delayChipText}>+1h</Text>
+                  </Pressable>
+                  <Pressable onPress={() => delayMut.mutate(delay + 120)} style={styles.delayChip} testID="delay-2h">
+                    <Text style={styles.delayChipText}>+2h</Text>
+                  </Pressable>
+                  {delay > 0 ? (
+                    <Pressable onPress={() => delayMut.mutate(0)} style={styles.delayClear} testID="delay-clear">
+                      <Text style={styles.delayClearText}>Clear</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
             {uploadInfo ? (
               <View style={styles.okBanner} testID="upload-ok">
                 <Icon name="check-decagram" size={16} color={colors.success} />
@@ -454,6 +493,22 @@ const useStyles = makeStyles((colors) => ({
     padding: spacing.md, borderRadius: radius.sm,
   },
   okText: { fontFamily: fonts.textMedium, color: colors.onBrandTertiary, fontSize: 13, flex: 1, lineHeight: 18 },
+
+  delayBar: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap",
+    gap: spacing.sm, marginBottom: spacing.sm,
+    backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  delayLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  delayRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  delayLabel: { fontFamily: fonts.textMedium, color: colors.onSurfaceSecondary, fontSize: 14 },
+  delayValue: { fontFamily: fonts.textSemiBold, fontSize: 14 },
+  delayBtn: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  delayChip: { paddingHorizontal: spacing.md, height: 36, borderRadius: radius.sm, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  delayChipText: { fontFamily: fonts.textSemiBold, color: colors.onBrandTertiary, fontSize: 14 },
+  delayClear: { paddingHorizontal: spacing.md, height: 36, borderRadius: radius.sm, alignItems: "center", justifyContent: "center" },
+  delayClearText: { fontFamily: fonts.textSemiBold, color: colors.error, fontSize: 14 },
   noteText: { fontFamily: fonts.textMedium, color: colors.onSurfaceSecondary, fontSize: 13, flex: 1 },
   armBanner: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm,

@@ -339,23 +339,48 @@ def parse_catch_sheet(filename: str, content: bytes, default_date: date):
 # Schedule + alarm building
 # ---------------------------------------------------------------------------
 
-def build_shed_timings(entries, settings, base_date: date):
+def build_shed_timings(entries, settings, base_date: date, delay_min: int = 0):
     tz = get_tz(settings["timezone"])
     sheds = []
     for e in entries:
         cd = e.get("catch_date") or base_date
+        base_dt = datetime.combine(cd, e["catch_time"])
+        if delay_min:
+            base_dt = base_dt + timedelta(minutes=delay_min)
         t = compute_shed_timing(
-            cd, e["catch_time"],
+            base_dt.date(), base_dt.time(),
             settings["augers_offset_min"], settings["lines_offset_min"],
             settings["catch_headsup_min"], tz, shed=e["shed"],
         )
         d = t.to_dict()
-        d["catch_date"] = cd.isoformat()
+        d["catch_date"] = base_dt.date().isoformat()
         d["farm"] = e.get("farm", "")
         d["loads"] = e.get("loads", [])
         sheds.append(d)
     sheds.sort(key=lambda s: (s.get("farm", ""), s["catch_utc"]))
     return sheds
+
+
+def serialize_base(entries):
+    """Store the raw (undelayed) catch anchors so delay/offset changes always
+    recompute from the original times, never from already-shifted values."""
+    return [{
+        "farm": e.get("farm", ""),
+        "shed": e["shed"],
+        "catch_time": e["catch_time"].strftime("%H:%M"),
+        "catch_date": (e.get("catch_date") or date.today()).isoformat(),
+        "loads": e.get("loads", []),
+    } for e in entries]
+
+
+def entries_from_base(base):
+    return [{
+        "farm": b.get("farm", ""),
+        "shed": b["shed"],
+        "catch_time": parse_time_value(b["catch_time"]),
+        "catch_date": date.fromisoformat(b["catch_date"]),
+        "loads": b.get("loads", []),
+    } for b in base]
 
 
 def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: dict, selected_farms):
@@ -403,18 +428,17 @@ async def rebuild_active_alarms(settings: dict):
     if not sched:
         return
     clean(sched)
-    base_date = date.fromisoformat(sched["catch_date"])
-    entries = []
-    for s in sched["sheds"]:
-        entries.append({
-            "farm": s.get("farm", ""),
-            "shed": s["shed"],
-            "catch_time": parse_time_value(s["catch_time"]),
-            "catch_date": date.fromisoformat(s.get("catch_date", sched["catch_date"])),
-            "loads": s.get("loads", []),
-        })
-    sheds = build_shed_timings(entries, settings, base_date)
-    selected = sched.get("selected_farms", [])
+    base = sched.get("base")
+    if not base:
+        base = [{
+            "farm": s.get("farm", ""), "shed": s["shed"], "catch_time": s["catch_time"],
+            "catch_date": s.get("catch_date", sched["catch_date"]), "loads": s.get("loads", []),
+        } for s in sched["sheds"]]
+    entries = entries_from_base(base)
+    base_date = min((e["catch_date"] for e in entries), default=date.fromisoformat(sched["catch_date"]))
+    delay_min = sched.get("delay_min", 0)
+    sheds = build_shed_timings(entries, settings, base_date, delay_min)
+    selected = settings.get("my_farms", [])
 
     old_alarms = await db.alarms.find({"schedule_id": sched["id"]}).to_list(1000)
     preserve = {(a.get("farm", ""), a["shed"], a["kind"]): a for a in old_alarms}
@@ -467,7 +491,7 @@ async def update_settings(update: SettingsUpdate):
 # ---------------------------------------------------------------------------
 
 async def _create_schedule(entries, filename, base_date, settings, note=""):
-    sheds = build_shed_timings(entries, settings, base_date)
+    sheds = build_shed_timings(entries, settings, base_date, 0)
     farms = sorted({s.get("farm", "") for s in sheds if s.get("farm")})
     selected = settings.get("my_farms", [])
     schedule_id = str(uuid.uuid4())
@@ -479,6 +503,8 @@ async def _create_schedule(entries, filename, base_date, settings, note=""):
         "note": note,
         "created_at": iso_now(),
         "active": True,
+        "delay_min": 0,
+        "base": serialize_base(entries),
         "sheds": sheds,
         "farms": farms,
         "offsets": {
@@ -550,6 +576,23 @@ async def list_schedules():
 async def delete_schedule(schedule_id: str):
     await db.schedules.update_one({"id": schedule_id}, {"$set": {"active": False}})
     return {"ok": True}
+
+
+class DelayUpdate(BaseModel):
+    delay_min: int
+
+
+@api_router.put("/schedule/delay")
+async def set_delay(update: DelayUpdate):
+    sched = await db.schedules.find_one({"active": True})
+    if not sched:
+        raise HTTPException(404, "No active schedule to delay.")
+    delay = max(0, update.delay_min)
+    await db.schedules.update_one({"id": sched["id"]}, {"$set": {"delay_min": delay}})
+    settings = await get_settings_doc()
+    await rebuild_active_alarms(settings)
+    return await latest_schedule()
+
 
 
 # ---------------------------------------------------------------------------
