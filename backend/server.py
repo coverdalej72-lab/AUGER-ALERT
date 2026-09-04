@@ -587,9 +587,12 @@ async def get_pairing_doc(create=True) -> Optional[dict]:
 
 
 @api_router.get("/pairing")
-async def pairing_status():
+async def pairing_status(app_url: Optional[str] = None):
     doc = await get_pairing_doc(create=True)
-    payload = f"farmtimer://pair?code={doc['code']}&token={doc['token']}"
+    if app_url:
+        payload = f"{app_url.rstrip('/')}/pair?code={doc['code']}"
+    else:
+        payload = f"farmtimer://pair?code={doc['code']}&token={doc['token']}"
     return {
         "paired": doc["paired"],
         "code": doc["code"],

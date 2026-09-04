@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 
-import { api, qk, type Alarm, type PairingStatus, type Schedule } from "@/src/api";
+import { api, qk, fetchPairing, type Alarm, type PairingStatus, type Schedule } from "@/src/api";
 import { KIND, dateLabel, hhmm, relative, shedLabel } from "@/src/format";
 import { Icon } from "@/src/components/Icon";
 import { Pill } from "@/src/components/ui";
@@ -33,7 +33,7 @@ export default function HomeScreen() {
   });
   const { data: pairing } = useQuery<PairingStatus>({
     queryKey: qk.pairing,
-    queryFn: () => api.get("/pairing"),
+    queryFn: fetchPairing,
     refetchInterval: 15000,
   });
 

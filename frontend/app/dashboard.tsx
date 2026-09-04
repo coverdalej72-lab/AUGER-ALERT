@@ -3,7 +3,7 @@ import { ScrollView, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, API, qk, type Alarm, type PairingStatus, type Schedule, type Settings } from "@/src/api";
+import { api, API, qk, fetchPairing, type Alarm, type PairingStatus, type Schedule, type Settings } from "@/src/api";
 import { KIND, dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
@@ -51,7 +51,7 @@ export default function Dashboard() {
   });
   const { data: pairing } = useQuery<PairingStatus>({
     queryKey: qk.pairing,
-    queryFn: () => api.get("/pairing"),
+    queryFn: fetchPairing,
     refetchInterval: 10000,
   });
   const { data: settings } = useQuery<Settings>({ queryKey: qk.settings, queryFn: () => api.get("/settings") });
@@ -327,7 +327,7 @@ export default function Dashboard() {
                   <View style={styles.qr} />
                 )}
               </View>
-              <Text style={styles.qrHint}>Scan in the phone app, or type this code:</Text>
+              <Text style={styles.qrHint}>Scan with your phone camera to open the app — or type this code:</Text>
               <Text style={styles.code} testID="pairing-code">{pairing?.code ?? "------"}</Text>
               {pairing?.paired ? (
                 <Pill label={`Paired: ${pairing.device_name}`} tone="success" icon="check" />

@@ -119,3 +119,12 @@ export const qk = {
   pairing: ["pairing"] as const,
   log: ["alarms", "log"] as const,
 };
+
+// The public origin of the web app (used to build the QR link that opens the
+// app in a phone browser — no Expo, no install).
+export function appOrigin(): string {
+  if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+  return process.env.EXPO_PUBLIC_BACKEND_URL || "";
+}
+
+export const fetchPairing = () => api.get(`/pairing?app_url=${encodeURIComponent(appOrigin())}`);

@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { Linking, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, qk, type PairingStatus, type Schedule, type Settings } from "@/src/api";
+import { api, qk, fetchPairing, type PairingStatus, type Schedule, type Settings } from "@/src/api";
 import { fmtMins, Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
 import { Icon } from "@/src/components/Icon";
@@ -26,7 +27,7 @@ export default function SettingsScreen() {
 
   const { data: pairing } = useQuery<PairingStatus>({
     queryKey: qk.pairing,
-    queryFn: () => api.get("/pairing"),
+    queryFn: fetchPairing,
     refetchInterval: 10000,
   });
   const { data: settings } = useQuery<Settings>({
@@ -106,6 +107,17 @@ export default function SettingsScreen() {
         <View>
           <SectionTitle>Phone pairing</SectionTitle>
           <Card testID="pairing-card">
+            <View style={styles.qrBlock}>
+              {pairing?.qr_data_url ? (
+                <Image source={{ uri: pairing.qr_data_url }} style={styles.qrImg} contentFit="contain" testID="settings-qr" />
+              ) : (
+                <View style={styles.qrImg} />
+              )}
+              <Text style={styles.qrCaption}>
+                Scan with any phone camera to open this app in the browser — no Expo, no install.
+              </Text>
+            </View>
+            <View style={styles.divider} />
             {pairing?.paired ? (
               <View style={{ gap: spacing.md }}>
                 <View style={styles.pairedRow}>
@@ -356,6 +368,9 @@ const useStyles = makeStyles((colors) => ({
   pairedTitle: { fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 16 },
   pairedSub: { fontFamily: fonts.text, color: colors.muted, fontSize: 13, marginTop: 2 },
   pairHint: { fontFamily: fonts.text, color: colors.onSurfaceSecondary, fontSize: 14, lineHeight: 20 },
+  qrBlock: { alignItems: "center", gap: spacing.sm },
+  qrImg: { width: 180, height: 180, backgroundColor: colors.surfaceInverse, borderRadius: radius.md, padding: spacing.sm },
+  qrCaption: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, textAlign: "center", lineHeight: 17 },
   codeInput: {
     fontFamily: fonts.displayBold,
     color: colors.onSurface,
