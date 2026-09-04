@@ -37,8 +37,10 @@ export const api = {
 // ---- Domain types ----------------------------------------------------------
 
 export type ShedTiming = {
+  farm: string;
   shed: string;
   catch_time: string;
+  loads: string[];
   catch_local: string;
   auger_off_local: string;
   lines_up_local: string;
@@ -55,6 +57,7 @@ export type AlarmKind = "auger_off" | "lines_up" | "catch_headsup" | "catch";
 export type Alarm = {
   id: string;
   schedule_id: string;
+  farm: string;
   shed: string;
   kind: AlarmKind;
   title: string;
@@ -70,9 +73,11 @@ export type Schedule = {
   id: string;
   catch_date: string;
   source_filename: string;
+  note?: string;
   created_at: string;
   active: boolean;
   sheds: ShedTiming[];
+  farms: string[];
   offsets: { augers_offset_min: number; lines_offset_min: number; catch_headsup_min: number };
 };
 
@@ -83,6 +88,7 @@ export type Settings = {
   realert_interval_min: number;
   realert_max: number;
   timezone: string;
+  my_farms: string[];
 };
 
 export type PairingStatus = {
@@ -97,6 +103,7 @@ export type PairingStatus = {
 export type LogEntry = {
   id: string;
   alarm_id: string;
+  farm: string;
   shed: string;
   kind: AlarmKind;
   title: string;

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, API, qk, type Alarm, type PairingStatus, type Schedule, type Settings } from "@/src/api";
 import { KIND, dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
+import { FarmManager } from "@/src/components/FarmManager";
 import { Icon } from "@/src/components/Icon";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -123,16 +124,23 @@ export default function Dashboard() {
 
   const schedule = data?.schedule ?? null;
   const alarms = data?.alarms ?? [];
+  const myFarms = local?.my_farms ?? [];
   const byShed = new Map<string, Alarm[]>();
-  alarms.forEach((a) => byShed.set(a.shed, [...(byShed.get(a.shed) ?? []), a]));
+  alarms.forEach((a) => {
+    const k = `${a.farm}|${a.shed}`;
+    byShed.set(k, [...(byShed.get(k) ?? []), a]);
+  });
 
-  const shedStatus = (shed: string) => {
-    const list = byShed.get(shed) ?? [];
+  const isArmed = (farm: string) => (schedule?.farms?.length ? myFarms.includes(farm) : true);
+
+  const shedStatus = (farm: string, shed: string) => {
+    if (!isArmed(farm)) return { tone: "neutral" as const, label: "—" };
+    const list = byShed.get(`${farm}|${shed}`) ?? [];
     if (!list.length) return { tone: "neutral" as const, label: "—" };
     const anyDue = list.some((a) => a.status === "pending" && new Date(a.fire_at_utc).getTime() <= Date.now());
     if (anyDue) return { tone: "error" as const, label: "Due" };
     if (list.every((a) => a.status === "acknowledged")) return { tone: "success" as const, label: "Done" };
-    return { tone: "neutral" as const, label: "Set" };
+    return { tone: "brand" as const, label: "Armed" };
   };
 
   const addDraft = () => {
@@ -243,8 +251,23 @@ export default function Dashboard() {
           {/* Table */}
           <View>
             <SectionTitle>Per-shed withdrawal times</SectionTitle>
+            {schedule?.note ? (
+              <View style={styles.noteBanner} testID="sheet-note">
+                <Icon name="information" size={16} color={colors.info} />
+                <Text style={styles.noteText}>{schedule.note}</Text>
+              </View>
+            ) : null}
+            {schedule?.farms?.length && myFarms.length === 0 ? (
+              <View style={styles.armBanner} testID="arm-prompt">
+                <Icon name="alert" size={16} color={colors.warning} />
+                <Text style={styles.armText}>
+                  Alarms are OFF — set your farm under &quot;My farms&quot; on the right to arm them.
+                </Text>
+              </View>
+            ) : null}
             <Card style={{ padding: 0 }} testID="times-table">
               <View style={[styles.trow, styles.thead]}>
+                <Text style={[styles.th, styles.cFarm]}>FARM</Text>
                 <Text style={[styles.th, styles.cShed]}>SHED</Text>
                 <Text style={[styles.th, styles.cCol]}>CATCH</Text>
                 <Text style={[styles.th, styles.cCol]}>AUGER OFF</Text>
@@ -254,9 +277,17 @@ export default function Dashboard() {
               </View>
               {schedule?.sheds.length ? (
                 schedule.sheds.map((s, i) => {
-                  const st = shedStatus(s.shed);
+                  const st = shedStatus(s.farm, s.shed);
+                  const armed = isArmed(s.farm);
                   return (
-                    <View key={s.shed + i} style={[styles.trow, i % 2 ? styles.rowAlt : null]} testID={`shed-row-${s.shed}`}>
+                    <View
+                      key={s.farm + s.shed + i}
+                      style={[styles.trow, i % 2 ? styles.rowAlt : null, !armed && { opacity: 0.45 }]}
+                      testID={`shed-row-${s.shed}`}
+                    >
+                      <Text style={[styles.td, styles.cFarm, styles.tdFarm]} numberOfLines={1}>
+                        {s.farm || "—"}
+                      </Text>
                       <View style={styles.cShed}>
                         <Text style={styles.tdShed}>{s.shed}</Text>
                       </View>
@@ -307,6 +338,27 @@ export default function Dashboard() {
               <PrimaryButton label="New code" icon="refresh" tone="ghost" onPress={() => regen.mutate()} testID="regen-code-button" />
             </Card>
           </View>
+
+          {local ? (
+            <View>
+              <SectionTitle>My farms (arm alarms)</SectionTitle>
+              <Card testID="my-farms-panel">
+                <FarmManager
+                  selected={local.my_farms}
+                  available={schedule?.farms ?? []}
+                  onChange={(next) => set({ my_farms: next })}
+                />
+                <View style={{ height: spacing.md }} />
+                <PrimaryButton
+                  label={saveSettings.isPending ? "Saving…" : saved ? "Saved ✓" : "Save & arm"}
+                  icon={saved ? "check" : "content-save"}
+                  tone={saved ? "success" : "brand"}
+                  onPress={() => saveSettings.mutate(local)}
+                  testID="d-save-farms"
+                />
+              </Card>
+            </View>
+          ) : null}
 
           {local ? (
             <View>
@@ -376,6 +428,19 @@ const useStyles = makeStyles((colors) => ({
   },
   errBannerText: { fontFamily: fonts.textMedium, color: colors.error, fontSize: 13, flex: 1 },
 
+  noteBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm,
+    backgroundColor: colors.surfaceSecondary, borderLeftWidth: 3, borderLeftColor: colors.info,
+    padding: spacing.md, borderRadius: radius.sm,
+  },
+  noteText: { fontFamily: fonts.textMedium, color: colors.onSurfaceSecondary, fontSize: 13, flex: 1 },
+  armBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm,
+    backgroundColor: colors.surfaceSecondary, borderLeftWidth: 3, borderLeftColor: colors.warning,
+    padding: spacing.md, borderRadius: radius.sm,
+  },
+  armText: { fontFamily: fonts.textMedium, color: colors.warning, fontSize: 13, flex: 1 },
+
   trow: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   thead: { borderBottomWidth: 1, borderBottomColor: colors.border },
   th: { fontFamily: fonts.textBold, color: colors.muted, fontSize: 11, letterSpacing: 1 },
@@ -383,7 +448,9 @@ const useStyles = makeStyles((colors) => ({
   td: { fontFamily: fonts.textMedium, color: colors.onSurfaceSecondary, fontSize: 18 },
   tdShed: { fontFamily: fonts.displayBold, color: colors.onSurface, fontSize: 22 },
   tdAccent: { color: colors.brandPrimary, fontFamily: fonts.textSemiBold },
-  cShed: { width: 70 },
+  tdFarm: { color: colors.onSurface, fontFamily: fonts.textSemiBold, fontSize: 14 },
+  cFarm: { flex: 1.4, paddingRight: spacing.sm },
+  cShed: { width: 56 },
   cCol: { flex: 1 },
   cStatus: { width: 80, alignItems: "flex-start" },
   tableEmpty: { alignItems: "center", gap: spacing.md, padding: spacing["3xl"] },

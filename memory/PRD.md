@@ -32,6 +32,14 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
 - High-contrast dark theme.
 
 ## Implemented (2026-06)
+- [x] REAL SHEET LOCKED: parser for the grower's processor "load/pickup" format —
+      multi-block sheets, each load has a Load Time + Farm + up to 3 Shed # groups.
+      Per (farm, shed) anchor = EARLIEST pickup; overnight pickup-date inference; the
+      sheet note ("delay lights off until 12am") is surfaced. 5 regression tests
+      (backend/test_real_sheet.py) against the actual file.
+- [x] Multi-farm sheets: alarms armed ONLY for the grower's own farm(s), chosen in
+      Settings > "My farms" (free-text add + quick-pick from the sheet). Farm shown on
+      the alarm screen, schedule, log and the dashboard Farm column.
 - [x] Timing engine + 19 anchor tests (7:00->01:00, 7:30->01:30, overnight rollover, UTC).
 - [x] Backend: settings (get/put + recompute), upload parser, manual schedule,
       schedule/latest+list+soft-delete, pairing (status/claim/regenerate/unpair),

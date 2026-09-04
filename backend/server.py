@@ -11,7 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional
 import uuid
-from datetime import datetime, date, timezone
+from datetime import datetime, date, time, timedelta, timezone
 
 import pandas as pd
 import qrcode
@@ -49,6 +49,7 @@ DEFAULT_SETTINGS = {
     "realert_interval_min": 10,    # re-alert unacknowledged alarms every N min
     "realert_max": 3,              # after N re-alerts the alarm is flagged critical
     "timezone": "Australia/Sydney",
+    "my_farms": [],                # grower's own farm(s); only these arm alarms
 }
 
 KIND_META = {
@@ -99,6 +100,7 @@ class Settings(BaseModel):
     realert_interval_min: int
     realert_max: int
     timezone: str
+    my_farms: List[str] = []
 
 
 class SettingsUpdate(BaseModel):
@@ -108,6 +110,7 @@ class SettingsUpdate(BaseModel):
     realert_interval_min: Optional[int] = None
     realert_max: Optional[int] = None
     timezone: Optional[str] = None
+    my_farms: Optional[List[str]] = None
 
 
 class ManualShed(BaseModel):
@@ -135,32 +138,172 @@ def _find_col(columns, keywords):
     return None
 
 
-def parse_catch_sheet(filename: str, content: bytes, default_date: date):
-    """Best-effort parse of a processor catch sheet (.xlsx/.csv)."""
-    name = filename.lower()
+def _cell_time(v):
+    if isinstance(v, datetime):
+        return v.time().replace(second=0, microsecond=0)
+    if isinstance(v, time):
+        return v.replace(second=0, microsecond=0)
     try:
-        if name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif name.endswith((".xlsx", ".xls", ".xlsm")):
+        return parse_time_value(v)
+    except Exception:
+        return None
+
+
+def extract_sheet_note(df) -> str:
+    for r in range(min(len(df), 40)):
+        for c in range(min(df.shape[1], 3)):
+            v = df.iat[r, c]
+            if isinstance(v, str) and "picked up" in v.lower():
+                return v.strip()
+    return ""
+
+
+def parse_block_sheet(df):
+    """Parse the processor 'load / pickup' format: repeating blocks each headed by
+    a 'Load Time' row, where every load lists a Load Time, a Farm and one or more
+    Shed # groups. The withdrawal anchor per (farm, shed) is its EARLIEST pickup.
+    Returns a list of entries or None if the format is not recognised."""
+    ncols = df.shape[1]
+    header_rows = [
+        r for r in range(len(df))
+        if any(str(df.iat[r, c]).strip() == "Load Time" for c in range(ncols))
+    ]
+    if not header_rows:
+        return None
+
+    h0 = header_rows[0]
+    hdr = [str(df.iat[h0, c]).strip() for c in range(ncols)]
+
+    def idx(name_options):
+        for c, v in enumerate(hdr):
+            if v in name_options:
+                return c
+        return None
+
+    lt_col = idx(("Load Time",))
+    farm_col = idx(("Farm",))
+    shed_cols = [c for c, v in enumerate(hdr) if v in ("Shed #", "Shed", "Shed#")]
+    if lt_col is None or not shed_cols:
+        return None
+
+    # date column = the column with the most datetime-at-midnight cells
+    best_col, best_n = None, 0
+    for c in range(ncols):
+        if c == lt_col:
+            continue
+        n = sum(
+            1 for r in range(len(df))
+            if isinstance(df.iat[r, c], datetime) and df.iat[r, c].hour == 0 and df.iat[r, c].minute == 0
+        )
+        if n > best_n:
+            best_n, best_col = n, c
+    date_col = best_col
+
+    # reference date from a "Date:" label
+    ref = None
+    for r in range(min(len(df), 30)):
+        for c in range(ncols - 1):
+            if str(df.iat[r, c]).strip().lower().rstrip(":") == "date":
+                for cc in range(c + 1, ncols):
+                    v = df.iat[r, cc]
+                    if isinstance(v, datetime):
+                        ref = v.date()
+                        break
+            if ref:
+                break
+        if ref:
+            break
+
+    bounds = header_rows + [len(df)]
+    pickups = {}  # (farm, shed) -> [datetime]
+    for b in range(len(header_rows)):
+        prev = None
+        for r in range(header_rows[b] + 1, bounds[b + 1]):
+            t = _cell_time(df.iat[r, lt_col])
+            if t is None:
+                continue
+            fv = df.iat[r, farm_col] if farm_col is not None else ""
+            if farm_col is not None and (fv is None or (isinstance(fv, float) and pd.isna(fv))):
+                continue
+            farm_str = str(fv).strip() if farm_col is not None else ""
+
+            d = None
+            if date_col is not None:
+                dv = df.iat[r, date_col]
+                if isinstance(dv, datetime) and pd.notna(dv):
+                    d = dv.date()
+            if d is None:
+                d = prev.date() if prev else (ref or date.today())
+                if prev and datetime.combine(d, t) < prev:
+                    d = d + timedelta(days=1)
+            dt = datetime.combine(d, t)
+            prev = dt
+
+            for sc in shed_cols:
+                s = df.iat[r, sc]
+                if s is None or (isinstance(s, float) and pd.isna(s)):
+                    continue
+                shed = str(int(s)) if isinstance(s, float) and float(s).is_integer() else str(s).strip()
+                pickups.setdefault((farm_str, shed), []).append(dt)
+
+    if not pickups:
+        return None
+
+    entries = []
+    for (fm, shed), times in pickups.items():
+        c = min(times)
+        loads = sorted({x.strftime("%H:%M") for x in times})
+        entries.append({
+            "farm": fm,
+            "shed": shed,
+            "catch_time": c.time(),
+            "catch_date": c.date(),
+            "loads": loads,
+        })
+    return entries
+
+
+def parse_catch_sheet(filename: str, content: bytes, default_date: date):
+    """Parse a processor catch/pickup sheet (.xlsx/.csv). Handles the multi-block
+    load format and a simple Shed/Catch-Time table."""
+    name = filename.lower()
+    note = ""
+
+    if name.endswith((".xlsx", ".xls", ".xlsm")):
+        try:
+            raw = pd.read_excel(io.BytesIO(content), header=None)
+        except Exception as e:
+            raise HTTPException(400, f"Could not read the file: {e}")
+        if raw.empty:
+            raise HTTPException(400, "The catch sheet appears to be empty.")
+        block = parse_block_sheet(raw)
+        if block:
+            note = extract_sheet_note(raw)
+            return block, note
+        try:
             df = pd.read_excel(io.BytesIO(content))
-        else:
-            raise HTTPException(400, "Unsupported file type. Upload a .xlsx or .csv catch sheet.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, f"Could not read the file: {e}")
+        except Exception as e:
+            raise HTTPException(400, f"Could not read the file: {e}")
+    elif name.endswith(".csv"):
+        try:
+            df = pd.read_csv(io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(400, f"Could not read the file: {e}")
+    else:
+        raise HTTPException(400, "Unsupported file type. Upload a .xlsx or .csv catch sheet.")
 
     if df.empty:
         raise HTTPException(400, "The catch sheet appears to be empty.")
 
     shed_col = _find_col(df.columns, [("shed",), ("house",), ("pen",), ("no",)])
-    time_col = _find_col(df.columns, [("catch", "time"), ("time",), ("catch",), ("pickup",)])
+    time_col = _find_col(df.columns, [("catch", "time"), ("load", "time"), ("time",), ("catch",), ("pickup",)])
     date_col = _find_col(df.columns, [("date",)])
+    farm_col = _find_col(df.columns, [("farm",)])
 
     if time_col is None:
         raise HTTPException(
             400,
-            "Could not find a catch-time column. Expected something like 'Catch Time' or "
+            "Could not find a catch/pickup time column. Expected 'Catch Time', 'Load Time' or "
             "'Time'. Columns found: " + ", ".join(str(c) for c in df.columns),
         )
 
@@ -183,11 +326,13 @@ def parse_catch_sheet(filename: str, content: bytes, default_date: date):
         cd = default_date
         if date_col is not None:
             cd = parse_date_value(row.get(date_col), default_date)
-        entries.append({"shed": shed_str, "catch_time": ct, "catch_date": cd})
+        farm_val = row.get(farm_col) if farm_col is not None else ""
+        farm_str = "" if farm_val is None or (isinstance(farm_val, float) and pd.isna(farm_val)) else str(farm_val).strip()
+        entries.append({"farm": farm_str, "shed": shed_str, "catch_time": ct, "catch_date": cd, "loads": []})
 
     if not entries:
         raise HTTPException(400, "No valid rows with a catch time were found in the sheet.")
-    return entries
+    return entries, note
 
 
 # ---------------------------------------------------------------------------
@@ -206,14 +351,20 @@ def build_shed_timings(entries, settings, base_date: date):
         )
         d = t.to_dict()
         d["catch_date"] = cd.isoformat()
+        d["farm"] = e.get("farm", "")
+        d["loads"] = e.get("loads", [])
         sheds.append(d)
-    sheds.sort(key=lambda s: s["catch_utc"])
+    sheds.sort(key=lambda s: (s.get("farm", ""), s["catch_utc"]))
     return sheds
 
 
-def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: dict):
+def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: dict, selected_farms):
+    farms_present = any(s.get("farm") for s in sheds)
+    selected = set(selected_farms or [])
     alarms = []
     for s in sheds:
+        if farms_present and s.get("farm") not in selected:
+            continue
         specs = [
             ("auger_off", s["auger_off_utc"], s["auger_off_local"]),
             ("lines_up", s["lines_up_utc"], s["lines_up_local"]),
@@ -223,10 +374,11 @@ def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: d
         specs.append(("catch", s["catch_utc"], s["catch_local"]))
 
         for kind, futc, flocal in specs:
-            old = preserve.get((s["shed"], kind))
+            old = preserve.get((s.get("farm", ""), s["shed"], kind))
             alarm = {
                 "id": str(uuid.uuid4()),
                 "schedule_id": schedule_id,
+                "farm": s.get("farm", ""),
                 "shed": s["shed"],
                 "kind": kind,
                 "title": KIND_META[kind]["title"],
@@ -255,14 +407,17 @@ async def rebuild_active_alarms(settings: dict):
     entries = []
     for s in sched["sheds"]:
         entries.append({
+            "farm": s.get("farm", ""),
             "shed": s["shed"],
             "catch_time": parse_time_value(s["catch_time"]),
             "catch_date": date.fromisoformat(s.get("catch_date", sched["catch_date"])),
+            "loads": s.get("loads", []),
         })
     sheds = build_shed_timings(entries, settings, base_date)
+    selected = sched.get("selected_farms", [])
 
     old_alarms = await db.alarms.find({"schedule_id": sched["id"]}).to_list(1000)
-    preserve = {(a["shed"], a["kind"]): a for a in old_alarms}
+    preserve = {(a.get("farm", ""), a["shed"], a["kind"]): a for a in old_alarms}
 
     await db.schedules.update_one({"id": sched["id"]}, {"$set": {"sheds": sheds, "offsets": {
         "augers_offset_min": settings["augers_offset_min"],
@@ -270,7 +425,7 @@ async def rebuild_active_alarms(settings: dict):
         "catch_headsup_min": settings["catch_headsup_min"],
     }}})
     await db.alarms.delete_many({"schedule_id": sched["id"]})
-    alarms = make_alarms(sched["id"], sheds, settings, preserve)
+    alarms = make_alarms(sched["id"], sheds, settings, preserve, selected)
     if alarms:
         await db.alarms.insert_many([{**a} for a in alarms])
 
@@ -311,17 +466,21 @@ async def update_settings(update: SettingsUpdate):
 # Routes: upload / schedule
 # ---------------------------------------------------------------------------
 
-async def _create_schedule(entries, filename, base_date, settings):
+async def _create_schedule(entries, filename, base_date, settings, note=""):
     sheds = build_shed_timings(entries, settings, base_date)
+    farms = sorted({s.get("farm", "") for s in sheds if s.get("farm")})
+    selected = settings.get("my_farms", [])
     schedule_id = str(uuid.uuid4())
     await db.schedules.update_many({"active": True}, {"$set": {"active": False}})
     doc = {
         "id": schedule_id,
         "catch_date": base_date.isoformat(),
         "source_filename": filename,
+        "note": note,
         "created_at": iso_now(),
         "active": True,
         "sheds": sheds,
+        "farms": farms,
         "offsets": {
             "augers_offset_min": settings["augers_offset_min"],
             "lines_offset_min": settings["lines_offset_min"],
@@ -329,7 +488,7 @@ async def _create_schedule(entries, filename, base_date, settings):
         },
     }
     await db.schedules.insert_one({**doc})
-    alarms = make_alarms(schedule_id, sheds, settings, {})
+    alarms = make_alarms(schedule_id, sheds, settings, {}, selected)
     if alarms:
         await db.alarms.insert_many([{**a} for a in alarms])
     return doc, alarms
@@ -340,12 +499,13 @@ async def upload_sheet(file: UploadFile = File(...)):
     settings = await get_settings_doc()
     content = await file.read()
     base_date = date.today()
-    entries = parse_catch_sheet(file.filename or "sheet", content, base_date)
+    entries, note = parse_catch_sheet(file.filename or "sheet", content, base_date)
     dated = [e["catch_date"] for e in entries if e.get("catch_date")]
     if dated:
         base_date = min(dated)
-    doc, alarms = await _create_schedule(entries, file.filename or "sheet", base_date, settings)
-    return {"schedule": clean(doc), "alarms": [clean(a) for a in alarms], "shed_count": len(doc["sheds"])}
+    doc, alarms = await _create_schedule(entries, file.filename or "sheet", base_date, settings, note)
+    return {"schedule": clean(doc), "alarms": [clean(a) for a in alarms],
+            "shed_count": len(doc["sheds"]), "farms": doc["farms"]}
 
 
 @api_router.post("/schedule/manual")
@@ -361,10 +521,11 @@ async def create_manual(sheds: List[ManualShed] = Body(...)):
         except Exception:
             raise HTTPException(400, f"Invalid time for shed {s.shed}: {s.catch_time}")
         cd = parse_date_value(s.catch_date, base_date) if s.catch_date else base_date
-        entries.append({"shed": s.shed, "catch_time": ct, "catch_date": cd})
+        entries.append({"farm": "", "shed": s.shed, "catch_time": ct, "catch_date": cd, "loads": []})
     base_date = min(e["catch_date"] for e in entries)
     doc, alarms = await _create_schedule(entries, "Manual entry", base_date, settings)
-    return {"schedule": clean(doc), "alarms": [clean(a) for a in alarms], "shed_count": len(doc["sheds"])}
+    return {"schedule": clean(doc), "alarms": [clean(a) for a in alarms],
+            "shed_count": len(doc["sheds"]), "farms": doc["farms"]}
 
 
 @api_router.get("/schedule/latest")
@@ -482,6 +643,7 @@ async def log_event(alarm: dict, event: str):
     await db.alarm_log.insert_one({
         "id": str(uuid.uuid4()),
         "alarm_id": alarm["id"],
+        "farm": alarm.get("farm", ""),
         "shed": alarm["shed"],
         "kind": alarm["kind"],
         "title": alarm["title"],

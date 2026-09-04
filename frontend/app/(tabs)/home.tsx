@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 
 import { api, qk, type Alarm, type PairingStatus, type Schedule } from "@/src/api";
-import { KIND, dateLabel, hhmm, relative } from "@/src/format";
+import { KIND, dateLabel, hhmm, relative, shedLabel } from "@/src/format";
 import { Icon } from "@/src/components/Icon";
 import { Pill } from "@/src/components/ui";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -66,7 +66,7 @@ export default function HomeScreen() {
             <Icon name={meta.icon} size={18} color={done ? colors.muted : colors.brandSecondary} />
             <Text style={[styles.rowAction, done && { color: colors.muted }]}>{meta.action}</Text>
           </View>
-          <Text style={styles.rowShed}>Shed {item.shed}</Text>
+          <Text style={styles.rowShed}>{shedLabel(item.farm, item.shed)}</Text>
         </View>
       </View>
     );
@@ -104,7 +104,7 @@ export default function HomeScreen() {
               <Text style={styles.heroLabel}>NEXT UP</Text>
               <Text style={styles.heroAction}>{KIND[nextUp.kind].action}</Text>
               <View style={styles.heroMeta}>
-                <Text style={styles.heroShed}>Shed {nextUp.shed}</Text>
+                <Text style={styles.heroShed}>{shedLabel(nextUp.farm, nextUp.shed)}</Text>
                 <Text style={styles.heroTime}>{hhmm(nextUp.fire_at_local)}</Text>
               </View>
               <Text style={styles.heroRel}>{relative(nextUp.fire_at_utc)}</Text>

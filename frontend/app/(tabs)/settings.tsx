@@ -4,8 +4,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, qk, type PairingStatus, type Settings } from "@/src/api";
+import { api, qk, type PairingStatus, type Schedule, type Settings } from "@/src/api";
 import { fmtMins, Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
+import { FarmManager } from "@/src/components/FarmManager";
 import { Icon } from "@/src/components/Icon";
 import { getDeviceId, getDeviceName } from "@/src/utils/device";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -32,6 +33,11 @@ export default function SettingsScreen() {
     queryKey: qk.settings,
     queryFn: () => api.get("/settings"),
   });
+  const { data: latest } = useQuery<{ schedule: Schedule | null }>({
+    queryKey: qk.schedule,
+    queryFn: () => api.get("/schedule/latest"),
+  });
+  const availableFarms = latest?.schedule?.farms ?? [];
 
   const [code, setCode] = useState("");
   const [pairError, setPairError] = useState<string | null>(null);
@@ -164,6 +170,20 @@ export default function SettingsScreen() {
             )}
           </Card>
         </View>
+
+        {/* My farms */}
+        {local ? (
+          <View>
+            <SectionTitle>My farms (arm alarms)</SectionTitle>
+            <Card testID="my-farms-card">
+              <FarmManager
+                selected={local.my_farms}
+                available={availableFarms}
+                onChange={(next) => set({ my_farms: next })}
+              />
+            </Card>
+          </View>
+        ) : null}
 
         {/* Offsets */}
         {local ? (

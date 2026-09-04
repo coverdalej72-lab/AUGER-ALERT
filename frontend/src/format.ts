@@ -36,3 +36,7 @@ export const KIND: Record<AlarmKind, KindMeta> = {
   catch_headsup: { label: "Catch heads-up", short: "Heads-up", icon: "bell-ring", action: "Catch heads-up" },
   catch: { label: "Catch starting", short: "Catch", icon: "truck", action: "Catch starting NOW" },
 };
+
+export function shedLabel(farm: string, shed: string): string {
+  return farm ? `${farm} · Shed ${shed}` : `Shed ${shed}`;
+}

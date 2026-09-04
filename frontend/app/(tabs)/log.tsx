@@ -3,7 +3,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 
 import { api, qk, type LogEntry } from "@/src/api";
-import { KIND } from "@/src/format";
+import { KIND, shedLabel } from "@/src/format";
 import { Icon } from "@/src/components/Icon";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -62,7 +62,7 @@ export default function LogScreen() {
               </View>
               <View style={styles.body}>
                 <Text style={styles.title}>
-                  {meta.short} · Shed {item.shed}
+                  {meta.short} · {shedLabel(item.farm, item.shed)}
                 </Text>
                 <Text style={[styles.event, { color: es.color }]}>{es.label}</Text>
               </View>

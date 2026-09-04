@@ -139,7 +139,9 @@ export function AlarmOverlay() {
             </View>
           </View>
 
-          <Text style={styles.shed} testID="alarm-shed">SHED {active.shed}</Text>
+          <Text style={styles.shed} testID="alarm-shed">
+            {active.farm ? active.farm.toUpperCase() + " · " : ""}SHED {active.shed}
+          </Text>
           <Text style={styles.action} testID="alarm-action">{meta.action}</Text>
           <Text style={styles.now}>NOW</Text>
           <Text style={styles.due}>Scheduled {active.fire_at_local.slice(11, 16)}</Text>
