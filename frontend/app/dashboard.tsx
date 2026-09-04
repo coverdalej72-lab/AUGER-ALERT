@@ -4,7 +4,7 @@ import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, API, qk, fetchPairing, type Alarm, type PairingStatus, type Schedule, type Settings } from "@/src/api";
-import { KIND, dateLabel, hhmm } from "@/src/format";
+import { dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
 import { Icon } from "@/src/components/Icon";
@@ -57,6 +57,7 @@ export default function Dashboard() {
   const { data: settings } = useQuery<Settings>({ queryKey: qk.settings, queryFn: () => api.get("/settings") });
 
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadInfo, setUploadInfo] = useState<{ shed_count: number; farms: string[]; filename: string } | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [dShed, setDShed] = useState("");
   const [dTime, setDTime] = useState("");
@@ -83,6 +84,7 @@ export default function Dashboard() {
     onSuccess: (r) => {
       if (r) {
         setUploadError(null);
+        setUploadInfo({ shed_count: r.shed_count, farms: r.farms || [], filename: r.schedule?.source_filename || "sheet" });
         qc.invalidateQueries({ queryKey: qk.schedule });
         qc.invalidateQueries({ queryKey: qk.alarms });
       }
@@ -92,9 +94,10 @@ export default function Dashboard() {
 
   const genManual = useMutation({
     mutationFn: (sheds: Draft[]) => api.post("/schedule/manual", sheds),
-    onSuccess: () => {
+    onSuccess: (r: any) => {
       setDrafts([]);
       setUploadError(null);
+      if (r) setUploadInfo({ shed_count: r.shed_count, farms: r.farms || [], filename: "Manual entry" });
       qc.invalidateQueries({ queryKey: qk.schedule });
       qc.invalidateQueries({ queryKey: qk.alarms });
     },
@@ -251,6 +254,18 @@ export default function Dashboard() {
           {/* Table */}
           <View>
             <SectionTitle>Per-shed withdrawal times</SectionTitle>
+            {uploadInfo ? (
+              <View style={styles.okBanner} testID="upload-ok">
+                <Icon name="check-decagram" size={16} color={colors.success} />
+                <Text style={styles.okText}>
+                  Auto-sorted {uploadInfo.shed_count} catches across {uploadInfo.farms.length} farm
+                  {uploadInfo.farms.length === 1 ? "" : "s"} — catch, auger-off &amp; lines-up computed.
+                  {myFarms.length
+                    ? ` Alarms sent to phone for: ${myFarms.join(", ")}.`
+                    : " Pick your farm under My farms to arm alarms."}
+                </Text>
+              </View>
+            ) : null}
             {schedule?.note ? (
               <View style={styles.noteBanner} testID="sheet-note">
                 <Icon name="information" size={16} color={colors.info} />
@@ -433,6 +448,12 @@ const useStyles = makeStyles((colors) => ({
     backgroundColor: colors.surfaceSecondary, borderLeftWidth: 3, borderLeftColor: colors.info,
     padding: spacing.md, borderRadius: radius.sm,
   },
+  okBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm,
+    backgroundColor: colors.brandTertiary, borderLeftWidth: 3, borderLeftColor: colors.success,
+    padding: spacing.md, borderRadius: radius.sm,
+  },
+  okText: { fontFamily: fonts.textMedium, color: colors.onBrandTertiary, fontSize: 13, flex: 1, lineHeight: 18 },
   noteText: { fontFamily: fonts.textMedium, color: colors.onSurfaceSecondary, fontSize: 13, flex: 1 },
   armBanner: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm,
