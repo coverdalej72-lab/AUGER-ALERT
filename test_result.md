@@ -181,3 +181,18 @@ test_plan:
 agent_communication:
     -agent: "main"
     -message: "Added browser Web Push (backend delivery via APScheduler + subscribe/test endpoints, VAPID configured) and phone-side catch-sheet upload. Please test BACKEND thoroughly: push endpoint lifecycle, that /push/test does not 500 on an unreachable endpoint, scheduler gating, and regression of upload/manual/delay/assign/active-alarms. Real push delivery to a live browser cannot be verified here — focus on endpoint correctness + no regressions. Frontend: just a light smoke check that the phone Home/Settings render with the push card + Upload button (headless shows the 'blocked' push state, which is expected)."
+    -agent: "main"
+    -message: "NEW: Added a Stripe SEASON PASS paywall (Emergent-managed Stripe, one-time AUD $29, unlocks 365 days). The desktop /dashboard is now gated. Endpoints: GET /api/billing/plan, POST /api/payments/checkout {email,product,origin}, GET /api/payments/status/{session_id}, GET /api/season-pass/status?email=. A demo pass is seeded for demo@feedwithdrawal.app (see test_credentials.md). Please TEST BACKEND billing: (1) /billing/plan returns AUD 29; (2) checkout returns a real Stripe url+session_id (proxy) and inserts a payment_transactions row as 'unpaid'; (3) amount is server-fixed — a client sending a different amount is ignored (only email/product/origin are read); (4) /season-pass/status returns active:true for demo@feedwithdrawal.app and active:false for unknown; (5) status/{unknown_session} => 404; (6) fulfillment is idempotent (cannot double-grant) — you can't complete a real hosted checkout headlessly, so verify the find_one_and_update claim logic by seeding a payment_transactions doc with payment_status stays as returned by Stripe (a fresh unpaid session should return fulfilled:false). Also REGRESSION: push endpoints + upload/manual/delay/assign/active-alarms still work. Frontend already verified by main agent via screenshot: paywall renders (A$29) and entering demo@feedwithdrawal.app + 'check access' unlocks the full control centre. NOTE: a global AlarmOverlay can cover the paywall if a due-alarm active schedule exists — known minor edge case, not a billing bug."
+
+billing_backend:
+  - task: "Stripe season pass — checkout, status/fulfillment, pass gating"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Emergent-managed Stripe (sk_test_emergent via proxy), one-time AUD $29 unlocks 365 days. Amount fixed server-side in PRICE_MAP. Verified locally: /billing/plan=AUD29, checkout returns real cs_test url (proxy 200), season-pass status active for seeded demo email. Needs: idempotent-fulfillment check, tamper resistance (client amount ignored), 404 on unknown session, regression of push+schedule flows."

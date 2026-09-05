@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Body, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -20,6 +20,7 @@ import pandas as pd
 import qrcode
 from pywebpush import webpush, WebPushException
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
 from timing import compute_shed_timing, parse_time_value, parse_date_value, get_tz
 
@@ -34,6 +35,14 @@ db = client[os.environ['DB_NAME']]
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:alerts@feedwithdrawal.app")
+
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+
+# Season pass catalog — amounts are fixed server-side (never trust the client).
+SEASON_PASS_DAYS = 365
+PRICE_MAP = {
+    "season_pass": {"amount": 29.00, "currency": "aud", "name": "Season Pass — 1 year"},
+}
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -977,6 +986,123 @@ async def deliver_due_alarms():
 
 
 scheduler = AsyncIOScheduler()
+
+
+# ---------------------------------------------------------------------------
+# Routes: billing (Stripe season pass — one-time payment, unlocks 1 year)
+# ---------------------------------------------------------------------------
+
+def _norm_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+class CheckoutRequest(BaseModel):
+    email: str
+    product: str = "season_pass"
+    origin: Optional[str] = None
+
+
+@api_router.get("/billing/plan")
+async def billing_plan():
+    p = PRICE_MAP["season_pass"]
+    return {"product": "season_pass", "amount": p["amount"], "currency": p["currency"],
+            "name": p["name"], "term_days": SEASON_PASS_DAYS}
+
+
+@api_router.post("/payments/checkout")
+async def create_checkout(body: CheckoutRequest, request: Request):
+    email = _norm_email(body.email)
+    if "@" not in email:
+        raise HTTPException(400, "Enter a valid email address.")
+    product = PRICE_MAP.get(body.product)
+    if not product:
+        raise HTTPException(400, "Unknown product.")
+    origin = (body.origin or "").rstrip("/")
+    if not origin:
+        origin = str(request.base_url).rstrip("/")
+
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY)
+    req = CheckoutSessionRequest(
+        amount=product["amount"],
+        currency=product["currency"],
+        success_url=f"{origin}/billing?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{origin}/dashboard",
+        metadata={"email": email, "product": body.product, "term_days": str(SEASON_PASS_DAYS)},
+    )
+    try:
+        session = await checkout.create_checkout_session(req)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("stripe checkout failed: %s", exc)
+        raise HTTPException(502, "Could not start checkout. Please try again.")
+
+    await db.payment_transactions.insert_one({
+        "session_id": session.session_id,
+        "email": email,
+        "product": body.product,
+        "amount": product["amount"],
+        "currency": product["currency"],
+        "payment_status": "unpaid",
+        "fulfilled": False,
+        "created_at": iso_now(),
+    })
+    return {"url": session.url, "session_id": session.session_id}
+
+
+@api_router.get("/payments/status/{session_id}")
+async def checkout_status(session_id: str):
+    tx = await db.payment_transactions.find_one({"session_id": session_id})
+    if not tx:
+        raise HTTPException(404, "Unknown checkout session.")
+
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY)
+    try:
+        result = await checkout.get_checkout_status(session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("stripe status failed: %s", exc)
+        raise HTTPException(502, "Could not check payment status.")
+
+    payment_status = getattr(result, "payment_status", "unpaid")
+    checkout_state = getattr(result, "status", "open")
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {"payment_status": payment_status, "checkout_status": checkout_state,
+                  "updated_at": iso_now()}},
+    )
+
+    if payment_status == "paid":
+        claim = await db.payment_transactions.find_one_and_update(
+            {"session_id": session_id, "payment_status": "paid", "fulfilled": False},
+            {"$set": {"fulfilled": True, "fulfilled_at": iso_now()}},
+        )
+        if claim:
+            now = now_utc()
+            until = now + timedelta(days=SEASON_PASS_DAYS)
+            await db.season_passes.update_one(
+                {"email": claim["email"]},
+                {"$set": {
+                    "email": claim["email"],
+                    "product": claim["product"],
+                    "valid_from": now.replace(microsecond=0).isoformat(),
+                    "valid_until": until.replace(microsecond=0).isoformat(),
+                    "source_session_id": session_id,
+                    "updated_at": iso_now(),
+                }, "$setOnInsert": {"created_at": iso_now()}},
+                upsert=True,
+            )
+
+    return {"status": checkout_state, "payment_status": payment_status,
+            "fulfilled": payment_status == "paid", "email": tx["email"]}
+
+
+@api_router.get("/season-pass/status")
+async def season_pass_status(email: Optional[str] = None):
+    if not email:
+        return {"active": False, "valid_until": None}
+    doc = await db.season_passes.find_one({"email": _norm_email(email)})
+    if not doc:
+        return {"active": False, "valid_until": None}
+    active = parse_iso(doc["valid_until"]) > now_utc()
+    return {"active": active, "valid_until": doc["valid_until"]}
 
 
 # ---------------------------------------------------------------------------

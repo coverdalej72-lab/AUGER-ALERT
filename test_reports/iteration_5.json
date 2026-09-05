@@ -1,0 +1,41 @@
+{
+  "summary": "Backend-only regression + NEW Stripe Season Pass paywall coverage. Full pytest: 47/47 pass sequentially (11 new billing tests in /app/backend/tests/test_billing.py + 36 existing regression). Verified: GET /api/billing/plan -> {product:'season_pass', amount:29.0, currency:'aud', term_days:365, name:'Season Pass — 1 year'}. POST /api/payments/checkout with {email, product:'season_pass', origin:'https://auger-alert-hub.preview.emergentagent.com'} returns a REAL Stripe hosted-checkout url containing 'checkout.stripe.com' and a 'cs_test_...' session_id, and inserts a payment_transactions doc with payment_status='unpaid', fulfilled=false, amount=29.0, currency='aud', email lower-cased. TAMPER RESISTANCE confirmed: sending extra fields {amount:0.01, currency:'usd'} is silently dropped by the Pydantic CheckoutRequest model — the stored tx amount stays 29.0 aud (server reads from PRICE_MAP only). Validation: email without '@' -> 400 'Enter a valid email address'; unknown product -> 400 'Unknown product'. GET /api/payments/status/{session_id} on a freshly-created session returns payment_status='unpaid' (or 'no_payment_required'), status='open', fulfilled=false; the guarded find_one_and_update({session_id,payment_status:'paid',fulfilled:false}) never fires so NO season_passes doc is created for that email (asserted directly via motor against test_database). Unknown session id -> 404. GET /api/season-pass/status?email=demo@feedwithdrawal.app -> {active:true, valid_until:'2027-...'}; unknown email -> {active:false, valid_until:null}; no email query -> {active:false, valid_until:null}; email case-insensitive (Demo@FEEDwithdrawal.APP still active). Regression (all still pass): push endpoints (VAPID public, subscribe/status/unsubscribe, test 400 w/o sub, test 200 graceful on unreachable endpoint), core flows POST /api/upload csv (Farm+Shed+Catch Time), POST /api/schedule/manual (anchor timings incl. previous-day auger for 5:00 catch), PUT /api/schedule/delay (idempotent +120 then reset to 0, recomputes from base), PUT /api/schedule/assign (set + clear + 404 for bad recipient), GET /api/schedule/latest, GET /api/alarms/active?device_id (paired-assigned vs paired-not-assigned vs unpaired fail-safe), POST /api/alarms/{id}/ack, POST /api/alarms/{id}/escalate, GET /api/alarms/log. Frontend testing SKIPPED per request note (main agent already verified paywall + demo unlock via screenshot).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_billing.py",
+    "/app/backend/tests/test_push.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_recipients.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/billing_results.xml"
+  ],
+  "action_items": [
+    "None required — billing endpoints + regression suite behave per spec.",
+    "OPTIONAL hardening (not blocking): CheckoutRequest currently silently drops unknown fields (Pydantic default). If you want to actively reject client-supplied 'amount'/'currency', add model_config = ConfigDict(extra='forbid'). Current behaviour still gives correct financial outcome (amount always 29 aud) so this is cosmetic.",
+    "OPTIONAL: /api/season-pass/status returns 200 with {active:false} when no email is given. If a stricter contract is desired, return 400 — but current UX-friendly behaviour lets the paywall poll before an email is entered without erroring."
+  ],
+  "critical_code_review_comments": [
+    "server.py /payments/checkout: amount+currency are ALWAYS read from PRICE_MAP[product] (line 1026-1027), never from the request body — this is the correct tamper-resistant pattern. Extra client fields are dropped by CheckoutRequest which only defines email/product/origin.",
+    "server.py /payments/status/{id}: fulfillment uses find_one_and_update({session_id, payment_status:'paid', fulfilled:false}, {$set:{fulfilled:true,...}}) which is atomic and idempotent — a single paid session can grant at most one season_passes upsert. Verified indirectly by confirming an unpaid session leaves season_passes empty.",
+    "season_passes upsert uses $set + $setOnInsert with valid_from/valid_until = now + 365 days; season_pass_status reads valid_until and compares to now_utc() — correct 1-year gating.",
+    "STRIPE_API_KEY read from os.environ.get with '' fallback: if the key is ever unset in production the emergentintegrations client will raise and /payments/checkout returns a 502 'Could not start checkout' — user-friendly, but consider logging a startup warning if the key is missing so ops notice.",
+    "Emails are normalised to lower-case via _norm_email in both /payments/checkout write and /season-pass/status read — case-insensitive lookup works end-to-end (test_email_case_normalisation covers this).",
+    "No _id leakage in billing responses (checkout returns only url+session_id; status returns only status/payment_status/fulfilled/email; season_pass returns only active/valid_until)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_billing.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (skipped per request)"},
+  "seed_data_creation": "Ephemeral only. Each billing test cleans up its own payment_transactions and season_passes rows in a finally block (test_billing_a@example.com, test_billing_tamper@example.com, test_billing_unpaid@example.com). Demo season pass for demo@feedwithdrawal.app is left untouched — it was pre-seeded by the app and is required for the paywall demo unlock flow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run backend sequentially: `pytest -o addopts='' backend/tests/` (47 pass, ~20s). test_billing.py covers plan/checkout/status/season-pass endpoints; direct motor asserts against DB_NAME=test_database validate tx rows + guard that unpaid sessions never grant a season_passes doc. Real Stripe test cs_test_ session IDs are minted per run — they stay 'open/unpaid' forever from a headless test (no way to complete hosted checkout), so DO NOT try to assert payment_status=='paid'. Env: STRIPE_API_KEY=sk_test_emergent (Emergent proxy at integrations.emergentagent.com/stripe). Demo pass email: demo@feedwithdrawal.app. Public base URL: EXPO_PUBLIC_BACKEND_URL. If billing tests fail with 502 the emergent-stripe proxy is down — retry.",
+  "rca_of_issue": "No bugs found. One authored-test bug caught during first run: assertion expected mixed-case email but server normalises to lower-case via _norm_email — fixed the test (server behaviour is correct and intentional per _norm_email at server.py:995)."
+}

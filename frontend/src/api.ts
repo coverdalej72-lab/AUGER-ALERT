@@ -141,7 +141,18 @@ export const qk = {
   recipients: ["recipients"] as const,
   whoami: ["whoami"] as const,
   log: ["alarms", "log"] as const,
+  pass: ["season-pass"] as const,
 };
+
+export type BillingPlan = {
+  product: string;
+  amount: number;
+  currency: string;
+  name: string;
+  term_days: number;
+};
+
+export type PassStatus = { active: boolean; valid_until: string | null };
 
 // The public origin of the web app (used to build the QR link that opens the
 // app in a phone browser — no Expo, no install).
@@ -152,3 +163,18 @@ export function appOrigin(): string {
 
 export const fetchRecipients = (): Promise<Recipient[]> =>
   api.get(`/recipients?app_url=${encodeURIComponent(appOrigin())}`);
+
+// ---- Billing (Stripe season pass) -----------------------------------------
+
+export const fetchPassStatus = (email: string): Promise<PassStatus> =>
+  api.get(`/season-pass/status?email=${encodeURIComponent(email)}`);
+
+export const fetchPlan = (): Promise<BillingPlan> => api.get(`/billing/plan`);
+
+export const startCheckout = (email: string): Promise<{ url: string; session_id: string }> =>
+  api.post(`/payments/checkout`, { email, product: "season_pass", origin: appOrigin() });
+
+export const fetchPaymentStatus = (
+  sessionId: string,
+): Promise<{ status: string; payment_status: string; fulfilled: boolean; email: string }> =>
+  api.get(`/payments/status/${encodeURIComponent(sessionId)}`);

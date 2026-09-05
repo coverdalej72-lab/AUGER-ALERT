@@ -61,14 +61,19 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
 - P2: History view of past days' schedules and completion stats.
 - Cleanup: expo-camera still declared in package.json but unused.
 
-## Done — session (web push + phone upload)
+## Done — session (web push + phone upload + Stripe paywall)
 - [x] Browser Web Push: VAPID configured, /sw.js + manifest at root, PushOptIn card on phone
       Home + Settings, subscribe/status/test/unsubscribe endpoints, APScheduler delivery every
       15s gated to the manager on catch (locked-screen alarms; iOS needs Add-to-Home-Screen).
 - [x] Upload catch sheet from the phone browser (Home header + empty-state) -> /api/upload.
-- [x] Tests: 36/36 backend pass (11 push + 25 regression); frontend smoke render OK.
-- NOTE: real locked-phone push delivery must be validated on a live paired device after deploy.
+- [x] Stripe SEASON PASS paywall gating /dashboard: Emergent-managed Stripe, one-time AUD $29
+      unlocks 365 days, email-only identity. Endpoints /billing/plan, /payments/checkout,
+      /payments/status/{id}, /season-pass/status. Demo pass seeded for demo@feedwithdrawal.app.
+- [x] Tests: 47/47 backend pass (billing + push + regression). Paywall + unlock verified by screenshot.
+- NOTE: Stripe is in TEST mode (sk_test_emergent). Real charges require deploy. If funds must land
+      in the grower's OWN Stripe account, switch to their keys + real subscription later.
 
 ## Next tasks
 - Confirm per-farm delay vs timezone auto-detect intent with the user.
+- Decide payout destination for real money (Emergent-managed test proxy vs user's own Stripe account).
 - User acceptance test on a real phone (pair, assign, lock screen, receive alarm).

@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, API, qk, appOrigin, fetchRecipients, type Alarm, type Recipient, type Schedule, type Settings } from "@/src/api";
+import { api, API, qk, appOrigin, fetchRecipients, fetchPassStatus, type Alarm, type PassStatus, type Recipient, type Schedule, type Settings } from "@/src/api";
 import { dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper, fmtMins } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
+import { Paywall } from "@/src/components/Paywall";
 import { Icon } from "@/src/components/Icon";
+import { getBillingEmail, setBillingEmail } from "@/src/utils/billing";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 type Latest = { schedule: Schedule | null; alarms: Alarm[] };
@@ -40,6 +42,45 @@ async function pickAndUpload(): Promise<FormData | null> {
 }
 
 export default function Dashboard() {
+  const { colors } = useTheme();
+  const qc = useQueryClient();
+  const [email, setEmailState] = useState<string | null>(null);
+
+  useEffect(() => {
+    getBillingEmail().then(setEmailState);
+  }, []);
+
+  const setEmail = useCallback(
+    async (e: string) => {
+      const n = e.trim().toLowerCase();
+      await setBillingEmail(n);
+      setEmailState(n);
+      qc.invalidateQueries({ queryKey: qk.pass });
+    },
+    [qc],
+  );
+
+  const { data: pass, isLoading } = useQuery<PassStatus>({
+    queryKey: [...qk.pass, email],
+    queryFn: () => fetchPassStatus(email as string),
+    enabled: !!email,
+    refetchInterval: 15000,
+  });
+
+  if (email === null || (email && isLoading && !pass)) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator size="large" color={colors.brandPrimary} />
+      </View>
+    );
+  }
+
+  if (email && pass?.active) return <DashboardInner />;
+
+  return <Paywall savedEmail={email || ""} onSetEmail={setEmail} />;
+}
+
+function DashboardInner() {
   const { colors } = useTheme();
   const styles = useStyles();
   const qc = useQueryClient();
