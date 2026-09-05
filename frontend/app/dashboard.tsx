@@ -62,6 +62,12 @@ export default function Dashboard() {
     [qc],
   );
 
+  const logout = useCallback(async () => {
+    await setBillingEmail("");
+    setEmailState("");
+    qc.clear();
+  }, [qc]);
+
   const { data: pass, isLoading } = useQuery<PassStatus>({
     queryKey: [...qk.pass, email],
     queryFn: () => fetchPassStatus(email as string),
@@ -77,12 +83,12 @@ export default function Dashboard() {
     );
   }
 
-  if (email && pass?.active) return <DashboardInner />;
+  if (email && pass?.active) return <DashboardInner accountEmail={email} onLogout={logout} />;
 
   return <Paywall savedEmail={email || ""} onSetEmail={setEmail} />;
 }
 
-function DashboardInner() {
+function DashboardInner({ accountEmail, onLogout }: { accountEmail: string; onLogout: () => void }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const qc = useQueryClient();
@@ -255,6 +261,10 @@ function DashboardInner() {
             tone={schedule?.assigned_name ? "success" : "warning"}
             icon={schedule?.assigned_name ? "account-check" : "account-alert"}
           />
+          <Pressable onPress={onLogout} style={styles.logoutBtn} testID="logout-button">
+            <Icon name="logout" size={16} color={colors.muted} />
+            <Text style={styles.logoutText} numberOfLines={1}>Log out ({accountEmail})</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -599,6 +609,8 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.brandPrimary,
   },
   testAlarmText: { fontFamily: fonts.textSemiBold, color: colors.brandPrimary, fontSize: 13 },
+  logoutBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.sm, paddingVertical: 6, maxWidth: 260 },
+  logoutText: { fontFamily: fonts.textMedium, color: colors.muted, fontSize: 12 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   logo: {
     width: 48, height: 48, borderRadius: radius.md, backgroundColor: colors.brandTertiary,
