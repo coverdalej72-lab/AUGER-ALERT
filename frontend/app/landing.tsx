@@ -1,10 +1,11 @@
-import { ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { Platform, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { Image } from "expo-image";
 
 import { Icon } from "@/src/components/Icon";
 import { PrimaryButton } from "@/src/components/ui";
+import { isPhoneWeb } from "@/src/utils/platform";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 const DASH = require("../assets/images/shot-dashboard.jpg");
@@ -23,6 +24,9 @@ export default function Landing() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const wide = width >= 900;
+
+  // On a computer, never show the marketing page — go straight to the program.
+  if (Platform.OS === "web" && !isPhoneWeb()) return <Redirect href="/dashboard" />;
 
   return (
     <ScrollView
