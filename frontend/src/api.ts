@@ -171,6 +171,9 @@ export const fetchPassStatus = (email: string): Promise<PassStatus> =>
 
 export const fetchPlan = (): Promise<BillingPlan> => api.get(`/billing/plan`);
 
+export const fetchShareQr = (url: string): Promise<{ url: string; qr_data_url: string }> =>
+  api.get(`/share/qr?url=${encodeURIComponent(url)}`);
+
 export const startCheckout = (email: string): Promise<{ url: string; session_id: string }> =>
   api.post(`/payments/checkout`, { email, product: "season_pass", origin: appOrigin() });
 

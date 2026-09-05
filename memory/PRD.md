@@ -77,3 +77,9 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
 - Confirm per-farm delay vs timezone auto-detect intent with the user.
 - Decide payout destination for real money (Emergent-managed test proxy vs user's own Stripe account).
 - User acceptance test on a real phone (pair, assign, lock screen, receive alarm).
+
+## Session addendum
+- [x] Deployment health check passed (no blockers): non-destructive push cleanup (soft-disable),
+      expo-notifications config plugin added, /health + /api/health endpoints added.
+- [x] Dashboard "Share & QR" panel: shows the live web link + scannable QR (GET /api/share/qr)
+      + Copy button. Uses window origin so it auto-updates to the permanent URL after deploy.

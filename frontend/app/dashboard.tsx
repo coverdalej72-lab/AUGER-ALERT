@@ -8,6 +8,7 @@ import { dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper, fmtMins } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
 import { Paywall } from "@/src/components/Paywall";
+import { ShareApp } from "@/src/components/ShareApp";
 import { Icon } from "@/src/components/Icon";
 import { getBillingEmail, setBillingEmail } from "@/src/utils/billing";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -436,6 +437,10 @@ function DashboardInner() {
 
         {/* SIDEBAR */}
         <View style={styles.sidebar}>
+          <View>
+            <SectionTitle>Share &amp; QR</SectionTitle>
+            <ShareApp />
+          </View>
           <View>
             <SectionTitle>Tonight&apos;s catch — who&apos;s on?</SectionTitle>
             <Card testID="crew-panel">

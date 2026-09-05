@@ -490,6 +490,12 @@ async def api_health():
     return {"status": "ok"}
 
 
+@api_router.get("/share/qr")
+async def share_qr(url: str):
+    """Return a scannable QR code (PNG data URL) for the given app link."""
+    return {"url": url, "qr_data_url": make_qr_data_url(url)}
+
+
 @api_router.get("/settings", response_model=Settings)
 async def read_settings():
     s = await get_settings_doc()
