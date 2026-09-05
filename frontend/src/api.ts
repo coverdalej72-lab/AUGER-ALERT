@@ -77,6 +77,8 @@ export type Schedule = {
   created_at: string;
   active: boolean;
   delay_min: number;
+  assigned_to: string | null;
+  assigned_name: string | null;
   sheds: ShedTiming[];
   farms: string[];
   offsets: { augers_offset_min: number; lines_offset_min: number; catch_headsup_min: number };
@@ -112,12 +114,32 @@ export type LogEntry = {
   at: string;
 };
 
+export type Recipient = {
+  id: string;
+  name: string;
+  paired: boolean;
+  device_name: string | null;
+  paired_at: string | null;
+  code: string;
+  qr_data_url: string;
+  payload: string;
+};
+
+export type Whoami = {
+  paired: boolean;
+  recipient_id?: string;
+  name?: string;
+  assigned?: boolean;
+  assigned_name?: string | null;
+};
+
 export const qk = {
   settings: ["settings"] as const,
   schedule: ["schedule", "latest"] as const,
   alarms: ["alarms"] as const,
   activeAlarms: ["alarms", "active"] as const,
-  pairing: ["pairing"] as const,
+  recipients: ["recipients"] as const,
+  whoami: ["whoami"] as const,
   log: ["alarms", "log"] as const,
 };
 
@@ -128,4 +150,5 @@ export function appOrigin(): string {
   return process.env.EXPO_PUBLIC_BACKEND_URL || "";
 }
 
-export const fetchPairing = () => api.get(`/pairing?app_url=${encodeURIComponent(appOrigin())}`);
+export const fetchRecipients = (): Promise<Recipient[]> =>
+  api.get(`/recipients?app_url=${encodeURIComponent(appOrigin())}`);

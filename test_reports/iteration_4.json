@@ -1,0 +1,39 @@
+{
+  "summary": "Backend + frontend regression for the NEW Web Push + phone upload feature. Backend pytest: 36/36 pass sequentially (11 new push tests in /app/backend/tests/test_push.py + 25 existing regression). Verified: GET /api/push/vapid-public returns the configured VAPID public key (>40 chars). POST /api/push/subscribe with {device_id, subscription{endpoint,keys}} returns {ok:true} and upserts on endpoint (repeat POST does not create dupes). GET /api/push/status?device_id=... returns {subscribed:true/false} correctly (false when no device_id, false before subscribe, true after subscribe, false after DELETE). DELETE /api/push/subscribe/{device_id} returns {ok:true} and removes subs. POST /api/push/subscribe with missing endpoint -> 400. POST /api/push/test with no subscription -> 400 as required. POST /api/push/test against an UNREACHABLE fake endpoint (nonexistent-push.invalid) -> 200 {ok:true}: pywebpush WebPushException / network errors are caught in _push_to_device and never bubble as 500. Scheduler gating via /api/alarms/active?device_id=... verified end-to-end: with schedule assigned to manager A, dev_a (assigned) sees due alarms, dev_b (paired but not assigned) sees 0, unpaired device_id and no device_id fall through fail-safe and see due alarms; toggling assignment to B swaps who sees alarms; clearing assignment (recipient_id=null) leaves paired managers with 0 alarms. Backend stability: /api/settings and /api/schedule/latest keep returning 200 across multiple scheduler ticks (interval=15s) without crash. Regression: POST /api/upload (CSV multipart, .xlsx also covered in existing tests), POST /api/schedule/manual, PUT /api/schedule/delay (+30 then 0), PUT /api/schedule/assign (set + clear), GET /api/schedule/latest, POST /api/alarms/{id}/ack, GET /api/alarms/log all still work. Frontend smoke @390x844 mobile: /home renders with body text length 612, contains data-testid=push-optin (Night-time phone alarms card), data-testid=phone-upload button, data-testid=paired-chip, no React Native red screen. /settings renders with body text 1006, also contains data-testid=push-optin. Notification API is denied in the headless Chromium (as expected per the request) so the card sits in its default/off state and the enable button is present — this is EXPECTED and NOT reported as a bug. Note: /app/backend/uploads/pick_up_31-08-2026.xlsx referenced in the request does not exist in this workspace; CSV regression was used instead and passes.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "package.json", "issue": "expo-camera ~57.0.4 remains declared but no in-app scanner exists; consider removing to shrink web bundle. Reference: /app/frontend/package.json (carry-over from iteration_3)"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_push.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_recipients.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/push_results.xml"
+  ],
+  "action_items": [
+    "None required — push endpoints and scheduler gating behave per spec. Real end-to-end delivery to a live browser (locked screen) cannot be validated in this environment; validate on a real paired iPhone/Android for final confirmation.",
+    "Optional: /app/backend/uploads/pick_up_31-08-2026.xlsx referenced in the request is missing from this workspace. If you rely on it for manual smoke, restore or drop the reference."
+  ],
+  "critical_code_review_comments": [
+    "server.py _push_to_device correctly catches WebPushException (auto-deletes subs on 404/410) and a broad Exception for network errors — this is the correct pattern; the /push/test route stays 200 even if all sends fail, which matches the spec.",
+    "deliver_due_alarms guards on assigned_to, paired recipient, and a live push_subscriptions row before sending; escalation is throttled by realert_interval_min and capped at realert_max, and push_count/last_pushed_at are preserved across rebuild_active_alarms via the preserve map. This looks correct.",
+    "scheduler.add_job(..., replace_existing=True, id='deliver') on every startup is idempotent, good. Scheduler is not shut down cleanly if start_scheduler fails, but shutdown handler is defensive.",
+    "PushOptIn hides itself when state==unsupported (unless iOS-needs-install); on a desktop Chrome without perm-request the state resolves to 'default' so the card DOES render. Consider a subtle explanation for the 'default' state (currently only differentiates On / Off / Denied)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_push.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Ephemeral only. Test recipients TEST_PushA, TEST_PushB, TEST_RegressGuy are created and torn down in finally blocks. Test push subscriptions use TEST_dev_* device_ids and fake unreachable endpoints; each test DELETEs its own subscription. Final schedule left in a benign state (single shed catch 20:00 today) so the AlarmOverlay isn't perpetually firing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run backend tests sequentially: `pytest -o addopts='' backend/tests/` (36 pass). test_push.py covers: /push/vapid-public, /push/subscribe (POST+DELETE), /push/status, /push/test (400 w/o sub, 200 graceful w/ unreachable endpoint), scheduler gating via /alarms/active (paired-assigned vs paired-not-assigned vs unpaired fail-safe), and backend stability across scheduler ticks. Fake subscriptions point at https://nonexistent-push.invalid/... so pywebpush fails at the network layer; the server must catch and still return 200. Do NOT try to assert real push delivery — that only works against a real browser subscription. Mobile viewport = 390x844; testIDs to know: push-optin, push-enable, push-test, phone-upload, paired-chip. The frontend Notification permission is 'denied' in headless Chromium; treat push_state='denied' UI as expected.",
+  "rca_of_issue": "No new bugs found this iteration. The previously fixed getDeviceId race (iteration_3) still holds — verified push-optin renders on the same device_id used by whoami and pairing/claim."
+}

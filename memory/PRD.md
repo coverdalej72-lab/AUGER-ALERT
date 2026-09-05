@@ -54,13 +54,21 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
 - [x] Full testing_agent pass (backend 11/11, all frontend flows).
 
 ## Backlog / remaining
-- P1: Real push notifications (Emergent-managed) so alarms arrive with app backgrounded —
-      requires deploy + native build; user deferred ("defaults for now").
 - P1: Lock exact column mapping to the grower's REAL catch sheet once uploaded (parser is
       currently tolerant/best-effort).
-- P2: Multiple offset rules per shed group; per-shed overrides.
+- P2: Per-farm delay overrides (user hinted; scope unclear — confirm before building).
+- P2: Auto-detect the grower's timezone instead of the fixed Australia/Sydney default.
 - P2: History view of past days' schedules and completion stats.
+- Cleanup: expo-camera still declared in package.json but unused.
+
+## Done — session (web push + phone upload)
+- [x] Browser Web Push: VAPID configured, /sw.js + manifest at root, PushOptIn card on phone
+      Home + Settings, subscribe/status/test/unsubscribe endpoints, APScheduler delivery every
+      15s gated to the manager on catch (locked-screen alarms; iOS needs Add-to-Home-Screen).
+- [x] Upload catch sheet from the phone browser (Home header + empty-state) -> /api/upload.
+- [x] Tests: 36/36 backend pass (11 push + 25 regression); frontend smoke render OK.
+- NOTE: real locked-phone push delivery must be validated on a live paired device after deploy.
 
 ## Next tasks
-- Await the user's real catch sheet to finalize parser column mapping.
-- Offer Emergent-managed push when they're ready to build for a device.
+- Confirm per-farm delay vs timezone auto-detect intent with the user.
+- User acceptance test on a real phone (pair, assign, lock screen, receive alarm).

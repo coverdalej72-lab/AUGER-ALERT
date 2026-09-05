@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal, Platform, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
@@ -15,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import { api, qk, type Alarm } from "@/src/api";
 import { KIND } from "@/src/format";
 import { alarmBeep } from "@/src/utils/sound";
+import { getDeviceId } from "@/src/utils/device";
 import { Icon } from "@/src/components/Icon";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -43,9 +44,14 @@ export function AlarmOverlay() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
 
+  const [deviceId, setDeviceId] = useState("");
+  useEffect(() => {
+    getDeviceId().then(setDeviceId);
+  }, []);
+
   const { data } = useQuery<ActiveResponse>({
-    queryKey: qk.activeAlarms,
-    queryFn: () => api.get("/alarms/active"),
+    queryKey: [...qk.activeAlarms, deviceId],
+    queryFn: () => api.get(`/alarms/active${deviceId ? `?device_id=${deviceId}` : ""}`),
     refetchInterval: 5000,
   });
 

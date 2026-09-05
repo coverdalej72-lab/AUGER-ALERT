@@ -1,12 +1,15 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 
-import { api, qk, fetchPairing, type Alarm, type PairingStatus, type Schedule } from "@/src/api";
+import { api, qk, type Alarm, type Schedule, type Whoami } from "@/src/api";
 import { KIND, dateLabel, hhmm, relative, shedLabel } from "@/src/format";
+import { getDeviceId } from "@/src/utils/device";
+import { pickAndUploadSheet } from "@/src/utils/upload";
 import { Icon } from "@/src/components/Icon";
+import { PushOptIn } from "@/src/components/PushOptIn";
 import { Pill } from "@/src/components/ui";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -31,18 +34,36 @@ export default function HomeScreen() {
     queryFn: () => api.get("/schedule/latest"),
     refetchInterval: 15000,
   });
-  const { data: pairing } = useQuery<PairingStatus>({
-    queryKey: qk.pairing,
-    queryFn: fetchPairing,
-    refetchInterval: 15000,
+  const [deviceId, setDeviceId] = useState("");
+  useEffect(() => {
+    getDeviceId().then(setDeviceId);
+  }, []);
+  const { data: whoami } = useQuery<Whoami>({
+    queryKey: [...qk.whoami, deviceId],
+    queryFn: () => api.get(`/pairing/whoami${deviceId ? `?device_id=${deviceId}` : ""}`),
+    enabled: !!deviceId,
+    refetchInterval: 10000,
   });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await qc.invalidateQueries({ queryKey: qk.schedule });
-    await qc.invalidateQueries({ queryKey: qk.pairing });
+    await qc.invalidateQueries({ queryKey: qk.whoami });
     setRefreshing(false);
   }, [qc]);
+
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const upload = useMutation({
+    mutationFn: () => pickAndUploadSheet(),
+    onSuccess: (r) => {
+      if (r) {
+        setUploadErr(null);
+        qc.invalidateQueries({ queryKey: qk.schedule });
+        qc.invalidateQueries({ queryKey: qk.alarms });
+      }
+    },
+    onError: (e: Error) => setUploadErr(e.message),
+  });
 
   const alarms = data?.alarms ?? [];
   const schedule = data?.schedule ?? null;
@@ -84,13 +105,24 @@ export default function HomeScreen() {
               : "No schedule loaded"}
           </Text>
         </View>
-        <Pressable testID="paired-chip">
-          <Pill
-            label={pairing?.paired ? "Paired" : "Not paired"}
-            tone={pairing?.paired ? "success" : "warning"}
-            icon={pairing?.paired ? "cellphone-link" : "cellphone-off"}
-          />
-        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable
+            onPress={() => upload.mutate()}
+            disabled={upload.isPending}
+            style={styles.uploadBtn}
+            testID="phone-upload"
+          >
+            <Icon name="file-upload-outline" size={18} color={colors.brandPrimary} />
+            <Text style={styles.uploadBtnText}>{upload.isPending ? "…" : "Upload"}</Text>
+          </Pressable>
+          <Pressable testID="paired-chip">
+            <Pill
+              label={whoami?.paired ? (whoami.assigned ? `On tonight: ${whoami.name}` : `Paired: ${whoami.name}`) : "Not paired"}
+              tone={whoami?.paired ? (whoami.assigned ? "success" : "neutral") : "warning"}
+              icon={whoami?.paired ? (whoami.assigned ? "bell-ring" : "account") : "cellphone-off"}
+            />
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
@@ -102,17 +134,21 @@ export default function HomeScreen() {
         }
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl, gap: spacing.xs }}
         ListHeaderComponent={
-          nextUp ? (
-            <View style={styles.hero} testID="next-up-card">
-              <Text style={styles.heroLabel}>NEXT UP</Text>
-              <Text style={styles.heroAction}>{KIND[nextUp.kind].action}</Text>
-              <View style={styles.heroMeta}>
-                <Text style={styles.heroShed}>{shedLabel(nextUp.farm, nextUp.shed)}</Text>
-                <Text style={styles.heroTime}>{hhmm(nextUp.fire_at_local)}</Text>
+          <View style={{ gap: spacing.md, marginBottom: alarms.length ? spacing.md : 0 }}>
+            <PushOptIn />
+            {uploadErr ? <Text style={styles.uploadErr}>{uploadErr}</Text> : null}
+            {nextUp ? (
+              <View style={styles.hero} testID="next-up-card">
+                <Text style={styles.heroLabel}>NEXT UP</Text>
+                <Text style={styles.heroAction}>{KIND[nextUp.kind].action}</Text>
+                <View style={styles.heroMeta}>
+                  <Text style={styles.heroShed}>{shedLabel(nextUp.farm, nextUp.shed)}</Text>
+                  <Text style={styles.heroTime}>{hhmm(nextUp.fire_at_local)}</Text>
+                </View>
+                <Text style={styles.heroRel}>{relative(nextUp.fire_at_utc)}</Text>
               </View>
-              <Text style={styles.heroRel}>{relative(nextUp.fire_at_utc)}</Text>
-            </View>
-          ) : null
+            ) : null}
+          </View>
         }
         ListEmptyComponent={
           isLoading ? (
@@ -128,9 +164,20 @@ export default function HomeScreen() {
               />
               <Text style={styles.emptyTitle}>No schedule yet</Text>
               <Text style={styles.emptyBody}>
-                Open the control centre on your PC, upload today&apos;s catch sheet, then scan the QR
-                in Settings to pair this phone.
+                Got today&apos;s catch sheet by email? Tap Upload above to load it here — or use the
+                control centre on your PC. Then pair this phone in Settings.
               </Text>
+              <Pressable
+                onPress={() => upload.mutate()}
+                disabled={upload.isPending}
+                style={styles.emptyUpload}
+                testID="empty-upload"
+              >
+                <Icon name="file-upload-outline" size={18} color={colors.onBrandPrimary} />
+                <Text style={styles.emptyUploadText}>
+                  {upload.isPending ? "Reading…" : "Upload catch sheet"}
+                </Text>
+              </Pressable>
             </View>
           )
         }
@@ -152,6 +199,30 @@ const useStyles = makeStyles((colors) => ({
   },
   h1: { fontFamily: fonts.displayBold, color: colors.onSurface, fontSize: 26 },
   h2: { fontFamily: fonts.text, color: colors.muted, fontSize: 13, marginTop: 2 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  uploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+  },
+  uploadBtnText: { fontFamily: fonts.textSemiBold, color: colors.brandPrimary, fontSize: 13 },
+  uploadErr: { fontFamily: fonts.textMedium, color: colors.error, fontSize: 13 },
+  emptyUpload: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.brandPrimary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
+  },
+  emptyUploadText: { fontFamily: fonts.textSemiBold, color: colors.onBrandPrimary, fontSize: 15 },
 
   hero: {
     backgroundColor: colors.brandTertiary,

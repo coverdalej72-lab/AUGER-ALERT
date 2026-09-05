@@ -104,22 +104,24 @@ class TestDelay:
         assert sched["base"][0]["catch_time"] == "07:00"
 
 
-# ---------------------- Pairing app_url payload ----------------------
+# ---------------------- Pairing app_url payload (via recipients) ----------------------
 
 class TestPairingAppUrl:
-    def test_pairing_with_app_url(self, s):
-        r = s.get(f"{API}/pairing", params={"app_url": "https://example.com"})
-        assert r.status_code == 200
-        d = r.json()
-        assert d["payload"].startswith("https://example.com/pair?code=")
-        assert d["code"] in d["payload"]
-        assert d["qr_data_url"].startswith("data:image/png;base64,")
+    def test_recipient_with_app_url(self, s):
+        rc = s.post(f"{API}/recipients", json={"name": "TEST_QRGuy"}, params={"app_url": "https://example.com"}).json()
+        try:
+            assert rc["payload"].startswith("https://example.com/pair?code=")
+            assert rc["code"] in rc["payload"]
+            assert rc["qr_data_url"].startswith("data:image/png;base64,")
+        finally:
+            s.delete(f"{API}/recipients/{rc['id']}")
 
-    def test_pairing_without_app_url(self, s):
-        r = s.get(f"{API}/pairing")
-        assert r.status_code == 200
-        d = r.json()
-        assert d["payload"].startswith("farmtimer://pair?code=")
+    def test_recipient_without_app_url(self, s):
+        rc = s.post(f"{API}/recipients", json={"name": "TEST_NoUrl"}).json()
+        try:
+            assert rc["payload"].startswith("farmtimer://pair?code=")
+        finally:
+            s.delete(f"{API}/recipients/{rc['id']}")
 
 
 # ---------------------- Multi-farm arming ----------------------

@@ -144,40 +144,29 @@ class TestScheduleLatest:
         assert fires == sorted(fires)
 
 
-# ---------------------- Pairing ----------------------
+# ---------------------- Pairing / claim (new: via recipients) ----------------------
 
-class TestPairing:
-    def test_pairing_get_and_claim(self, s):
-        # regenerate to a known state
-        r = s.post(f"{API}/pairing/regenerate")
-        assert r.status_code == 200
-        p = r.json()
-        assert p["paired"] is False
-        assert len(p["code"]) == 6
-        assert p["qr_data_url"].startswith("data:image/png;base64,")
-
-        # wrong code
-        r = s.post(f"{API}/pairing/claim", json={"code": "000000" if p["code"] != "000000" else "111111",
-                                                  "device_id": "dev-x"})
+class TestPairingClaim:
+    def test_wrong_code_400(self, s):
+        r = s.post(f"{API}/pairing/claim", json={"code": "999999", "device_id": "dev-wrong"})
         assert r.status_code == 400
 
-        # correct code
-        r = s.post(f"{API}/pairing/claim", json={"code": p["code"], "device_id": "dev-1", "device_name": "TestPhone"})
-        assert r.status_code == 200
+    def test_claim_then_whoami(self, s):
+        # create manager
+        rc = s.post(f"{API}/recipients", json={"name": "TEST_ClaimGuy"}).json()
+        code = rc["code"]; rid = rc["id"]
+        try:
+            r = s.post(f"{API}/pairing/claim", json={"code": code, "device_id": "TEST_dev_claim", "device_name": "TP"})
+            assert r.status_code == 200
+            d = r.json()
+            assert d["recipient_id"] == rid
+            assert d["name"] == "TEST_ClaimGuy"
 
-        r = s.get(f"{API}/pairing")
-        d = r.json()
-        assert d["paired"] is True
-        assert d["device_name"] == "TestPhone"
-
-    def test_regenerate_unpairs(self, s):
-        # pair first
-        r = s.post(f"{API}/pairing/regenerate").json()
-        s.post(f"{API}/pairing/claim", json={"code": r["code"], "device_id": "d", "device_name": "P"})
-        # regenerate
-        r2 = s.post(f"{API}/pairing/regenerate").json()
-        assert r2["paired"] is False
-        assert r2["code"] != r["code"]
+            w = s.get(f"{API}/pairing/whoami", params={"device_id": "TEST_dev_claim"}).json()
+            assert w["paired"] is True
+            assert w["name"] == "TEST_ClaimGuy"
+        finally:
+            s.delete(f"{API}/recipients/{rid}")
 
 
 # ---------------------- Alarms flow ----------------------

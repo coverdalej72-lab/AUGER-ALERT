@@ -44,7 +44,13 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
+    if (Platform.OS === "web") {
+      import("@/src/utils/push").then((m) => {
+        m.injectPwaMeta();
+        m.registerSW();
+      });
+      return;
+    }
     import("expo-notifications")
       .then((N) => N.requestPermissionsAsync())
       .catch(() => {});

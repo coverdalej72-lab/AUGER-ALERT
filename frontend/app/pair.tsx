@@ -30,7 +30,7 @@ export default function PairScreen() {
         const device_id = await getDeviceId();
         const device_name = await getDeviceName();
         await api.post("/pairing/claim", { code, device_id, device_name });
-        qc.invalidateQueries({ queryKey: qk.pairing });
+        qc.invalidateQueries({ queryKey: qk.whoami });
         setStatus("done");
         setMessage("Paired! Opening your schedule…");
         setTimeout(() => router.replace("/(tabs)/home"), 1200);

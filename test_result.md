@@ -101,3 +101,83 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Browser-based Farm Feed Withdrawal Timer. Latest work: (1) reliable night-time browser Web Push alarms so a paired phone rings even when locked, delivered only to the manager on catch; (2) ability to upload the catch sheet from the phone browser (managers get the sheet by email)."
+
+backend:
+  - task: "Web push subscription lifecycle (subscribe/status/test/unsubscribe)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "New endpoints: POST /api/push/subscribe, GET /api/push/status, POST /api/push/test, DELETE /api/push/subscribe/{device_id}, GET /api/push/vapid-public. Stored in db.push_subscriptions keyed by endpoint. VAPID keys in backend/.env. Real delivery to a live push service cannot be verified from a headless client; verify endpoints return correct shapes and that /push/test returns ok even when the endpoint is unreachable (send failure is caught/logged, 404/410 prune the sub)."
+  - task: "Scheduled push delivery gated to assigned manager"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "APScheduler job deliver_due_alarms runs every 15s. Only pushes to the device_id of the recipient assigned to the active schedule, for pending alarms whose fire_at_utc<=now, with re-alert on realert_interval up to realert_max. Verify no crash on startup and that gating logic (no assigned manager => no push) holds."
+  - task: "Regression: upload / manual schedule / delay / assign / active-alarms gating still work"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "server.py changed (imports, make_alarms now preserves push_count/last_pushed_at). Confirm existing flows unaffected. Local pytest: 24 passed."
+
+frontend:
+  - task: "Phone push opt-in card + service worker + PWA manifest"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/PushOptIn.tsx, frontend/src/utils/push.ts, frontend/public/sw.js, frontend/public/manifest.json"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Push opt-in card on phone Home + Settings (web only). /sw.js, /manifest.json, /icon-192.png confirmed 200 at root. Headless browsers report Notification.permission=denied so the card correctly shows the 'blocked/open settings' state — that is expected, not a bug. Just confirm the card renders and the app isn't broken."
+  - task: "Upload catch sheet from the phone"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/(tabs)/home.tsx, frontend/src/utils/upload.ts"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Upload button in Home header + empty-state uses expo-document-picker -> POST /api/upload. Confirm button renders; file-picker itself can't be driven in automation."
+
+metadata:
+  created_by: "main_agent"
+  version: "2.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Web push subscription lifecycle (subscribe/status/test/unsubscribe)"
+    - "Scheduled push delivery gated to assigned manager"
+    - "Regression: upload / manual schedule / delay / assign / active-alarms gating still work"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "Added browser Web Push (backend delivery via APScheduler + subscribe/test endpoints, VAPID configured) and phone-side catch-sheet upload. Please test BACKEND thoroughly: push endpoint lifecycle, that /push/test does not 500 on an unreachable endpoint, scheduler gating, and regression of upload/manual/delay/assign/active-alarms. Real push delivery to a live browser cannot be verified here — focus on endpoint correctness + no regressions. Frontend: just a light smoke check that the phone Home/Settings render with the push card + Upload button (headless shows the 'blocked' push state, which is expected)."

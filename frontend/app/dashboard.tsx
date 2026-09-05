@@ -3,7 +3,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, API, qk, fetchPairing, type Alarm, type PairingStatus, type Schedule, type Settings } from "@/src/api";
+import { api, API, qk, appOrigin, fetchRecipients, type Alarm, type Recipient, type Schedule, type Settings } from "@/src/api";
 import { dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper, fmtMins } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
@@ -49,9 +49,9 @@ export default function Dashboard() {
     queryFn: () => api.get("/schedule/latest"),
     refetchInterval: 15000,
   });
-  const { data: pairing } = useQuery<PairingStatus>({
-    queryKey: qk.pairing,
-    queryFn: fetchPairing,
+  const { data: recipients } = useQuery<Recipient[]>({
+    queryKey: qk.recipients,
+    queryFn: fetchRecipients,
     refetchInterval: 10000,
   });
   const { data: settings } = useQuery<Settings>({ queryKey: qk.settings, queryFn: () => api.get("/settings") });
@@ -104,9 +104,33 @@ export default function Dashboard() {
     onError: (e: Error) => setUploadError(e.message),
   });
 
-  const regen = useMutation({
-    mutationFn: () => api.post("/pairing/regenerate"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.pairing }),
+  const [newManager, setNewManager] = useState("");
+  const [qrOpen, setQrOpen] = useState<string | null>(null);
+
+  const assignMut = useMutation({
+    mutationFn: (recipient_id: string | null) => api.put("/schedule/assign", { recipient_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.schedule });
+      qc.invalidateQueries({ queryKey: qk.recipients });
+    },
+  });
+  const addManagerMut = useMutation({
+    mutationFn: (name: string) => api.post(`/recipients?app_url=${encodeURIComponent(appOrigin())}`, { name }),
+    onSuccess: () => {
+      setNewManager("");
+      qc.invalidateQueries({ queryKey: qk.recipients });
+    },
+  });
+  const removeManagerMut = useMutation({
+    mutationFn: (id: string) => api.del(`/recipients/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.recipients });
+      qc.invalidateQueries({ queryKey: qk.schedule });
+    },
+  });
+  const regenManagerMut = useMutation({
+    mutationFn: (id: string) => api.post(`/recipients/${id}/regenerate?app_url=${encodeURIComponent(appOrigin())}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.recipients }),
   });
 
   const delayMut = useMutation({
@@ -179,9 +203,9 @@ export default function Dashboard() {
           </View>
         </View>
         <Pill
-          label={pairing?.paired ? `Phone paired: ${pairing.device_name}` : "Phone not paired"}
-          tone={pairing?.paired ? "success" : "warning"}
-          icon={pairing?.paired ? "cellphone-link" : "cellphone-off"}
+          label={schedule?.assigned_name ? `On catch: ${schedule.assigned_name}` : "No-one assigned"}
+          tone={schedule?.assigned_name ? "success" : "warning"}
+          icon={schedule?.assigned_name ? "account-check" : "account-alert"}
         />
       </View>
 
@@ -372,24 +396,88 @@ export default function Dashboard() {
         {/* SIDEBAR */}
         <View style={styles.sidebar}>
           <View>
-            <SectionTitle>Pair your phone</SectionTitle>
-            <Card testID="pairing-panel">
-              <View style={styles.qrWrap}>
-                {pairing?.qr_data_url ? (
-                  <Image source={{ uri: pairing.qr_data_url }} style={styles.qr} contentFit="contain" testID="pairing-qr" />
-                ) : (
-                  <View style={styles.qr} />
-                )}
-              </View>
-              <Text style={styles.qrHint}>Scan with your phone camera to open the app — or type this code:</Text>
-              <Text style={styles.code} testID="pairing-code">{pairing?.code ?? "------"}</Text>
-              {pairing?.paired ? (
-                <Pill label={`Paired: ${pairing.device_name}`} tone="success" icon="check" />
+            <SectionTitle>Tonight&apos;s catch — who&apos;s on?</SectionTitle>
+            <Card testID="crew-panel">
+              {recipients && recipients.length ? (
+                <View style={styles.crewChips}>
+                  {recipients.map((r) => {
+                    const on = schedule?.assigned_to === r.id;
+                    return (
+                      <Pressable
+                        key={r.id}
+                        onPress={() => assignMut.mutate(on ? null : r.id)}
+                        style={[styles.crewChip, on && styles.crewChipOn]}
+                        testID={`assign-${r.id}`}
+                      >
+                        <Icon name={on ? "account-check" : "account"} size={16} color={on ? colors.onBrandPrimary : colors.onSurfaceSecondary} />
+                        <Text style={[styles.crewChipText, on && { color: colors.onBrandPrimary }]}>{r.name}</Text>
+                        {r.paired ? <View style={styles.pairedDot} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
               ) : (
-                <Pill label="Waiting for phone…" tone="warning" icon="timer-sand" />
+                <Text style={styles.qrHint}>
+                  Add each manager below. They pair their phone once, then you just pick who&apos;s on each night.
+                </Text>
               )}
-              <View style={{ height: spacing.md }} />
-              <PrimaryButton label="New code" icon="refresh" tone="ghost" onPress={() => regen.mutate()} testID="regen-code-button" />
+              <Text style={styles.assignNote}>
+                {schedule
+                  ? schedule.assigned_name
+                    ? `Alarms go to ${schedule.assigned_name}'s phone only.`
+                    : "Pick a manager to send tonight's alarms to their phone."
+                  : "Upload a catch sheet first, then pick who's on."}
+              </Text>
+
+              {recipients && recipients.length ? (
+                <>
+                  <View style={styles.divider} />
+                  <Text style={styles.subHead}>MANAGERS (PAIR ONCE)</Text>
+                  {recipients.map((r) => (
+                    <View key={r.id} style={styles.mgrRow} testID={`manager-${r.id}`}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.mgrName}>{r.name}</Text>
+                        <Text style={styles.mgrStatus}>
+                          {r.paired ? `Paired · ${r.device_name}` : `Not paired · code ${r.code}`}
+                        </Text>
+                      </View>
+                      <Pressable onPress={() => setQrOpen(qrOpen === r.id ? null : r.id)} style={styles.mgrBtn} testID={`qr-${r.id}`}>
+                        <Icon name="qrcode" size={18} color={colors.onSurface} />
+                      </Pressable>
+                      <Pressable onPress={() => removeManagerMut.mutate(r.id)} style={styles.mgrBtn} testID={`remove-${r.id}`}>
+                        <Icon name="trash-can-outline" size={18} color={colors.error} />
+                      </Pressable>
+                    </View>
+                  ))}
+                  {qrOpen && recipients.find((x) => x.id === qrOpen) ? (
+                    <View style={styles.qrWrap} testID="manager-qr">
+                      <Image source={{ uri: recipients.find((x) => x.id === qrOpen)!.qr_data_url }} style={styles.qr} contentFit="contain" />
+                      <Text style={styles.qrHint}>Scan once with the phone camera, or type this code:</Text>
+                      <Text style={styles.code}>{recipients.find((x) => x.id === qrOpen)!.code}</Text>
+                      <PrimaryButton label="New code" icon="refresh" tone="ghost" onPress={() => regenManagerMut.mutate(qrOpen)} testID="regen-manager" />
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
+
+              <View style={styles.mgrAddRow}>
+                <TextInput
+                  value={newManager}
+                  onChangeText={setNewManager}
+                  placeholder="Add manager name"
+                  placeholderTextColor={colors.muted}
+                  style={styles.mgrInput}
+                  onSubmitEditing={() => newManager.trim() && addManagerMut.mutate(newManager.trim())}
+                  testID="add-manager-input"
+                />
+                <PrimaryButton
+                  label="Add"
+                  icon="account-plus"
+                  tone="ghost"
+                  onPress={() => newManager.trim() && addManagerMut.mutate(newManager.trim())}
+                  testID="add-manager-button"
+                />
+              </View>
             </Card>
           </View>
 
@@ -532,7 +620,28 @@ const useStyles = makeStyles((colors) => ({
   tableEmpty: { alignItems: "center", gap: spacing.md, padding: spacing["3xl"] },
   tableEmptyText: { fontFamily: fonts.text, color: colors.muted, fontSize: 14, textAlign: "center", maxWidth: 320 },
 
-  qrWrap: { alignItems: "center", marginBottom: spacing.md },
+  qrWrap: { alignItems: "center", marginBottom: spacing.md, marginTop: spacing.md, gap: spacing.xs },
+  crewChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.sm },
+  crewChip: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill,
+  },
+  crewChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  crewChipText: { fontFamily: fonts.textSemiBold, color: colors.onSurfaceSecondary, fontSize: 14 },
+  pairedDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },
+  assignNote: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, lineHeight: 17 },
+  subHead: { fontFamily: fonts.textBold, color: colors.muted, fontSize: 11, letterSpacing: 1.2, marginBottom: spacing.sm },
+  mgrRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm },
+  mgrName: { fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 15 },
+  mgrStatus: { fontFamily: fonts.text, color: colors.muted, fontSize: 12, marginTop: 1 },
+  mgrBtn: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  mgrAddRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, alignItems: "center" },
+  mgrInput: {
+    flex: 1, fontFamily: fonts.text, color: colors.onSurface, fontSize: 15,
+    backgroundColor: colors.surfaceTertiary, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+  },
   qr: { width: 200, height: 200, backgroundColor: colors.surfaceInverse, borderRadius: radius.md, padding: spacing.sm },
   qrHint: { fontFamily: fonts.text, color: colors.muted, fontSize: 13, textAlign: "center" },
   code: {

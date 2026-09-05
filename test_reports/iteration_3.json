@@ -1,0 +1,40 @@
+{
+  "summary": "Full backend + frontend regression for the NEW multi-manager (recipients) feature. Backend: 25/25 pytest cases pass sequentially (13 existing regression + 5 new-features + 7 recipients). Recipients CRUD, code regeneration + unpair, /pairing/claim wrong-code 400, device-single-manager move, /pairing/whoami paired+assigned semantics, PUT /schedule/assign (set/clear/404), and ALARMS GATING all verified: assigned manager device gets due alarms, other paired manager gets 0, unpaired desktop (device_id not registered) still gets due alarms as a fail-safe, no device_id also gets alarms as fail-safe, and clearing assignment zeros paired-manager alarms. Regression: manual anchor timing (shed 7:00 -> auger 01:00, 5:00 catch -> 23:00 prev-day auger), /schedule/delay +120 shifts and does not compound, my_farms limits arming, /recipients app_url payload builds https web /pair?code=NNN + qr_data_url. Frontend @1360 dashboard: crew-panel + assign-<id> + qr-<id> + regen-manager + remove-<id> + add-manager-input/button all working; header pill updates to 'On catch: TEST_UI' after assign toggle; QR/code visible in manager-qr; remove works and unassigns. Frontend @390 mobile settings: pairing-card renders unpaired form with pairing-code-input + pair-button; NO settings-qr and NO unpair-button (as required); entering Sam's code + pair-button shows 'Paired as Sam' with Off pill (Dave on catch) and 'Switch manager' UI. Frontend @390 mobile home: paired-chip reflects whoami ('Paired: Sam' when paired-but-not-assigned; 'Not paired' when fresh device). Frontend auto-pair /pair?code=<manager code>: pair-status flips to 'Paired! Opening your schedule\u2026' then router.replace to /(tabs)/home and paired-chip shows 'Paired: Sam'. Bug found & fixed: getDeviceId() had a race across concurrent callers (AlarmOverlay + Settings/Home each called it on mount, both generated a fresh uuid, only the last write to AsyncStorage won \u2014 so useQuery(whoami) used a different device_id than pairing/claim's device_id, breaking paired-as/paired-chip on first load after clean storage). Root cause: /app/frontend/src/utils/device.ts had no in-flight cache. Fix: added module-level Promise cache so concurrent callers share the same id. Verified after restart: 'Paired as Sam' now appears on settings and 'Paired: Sam' on home reliably.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "package.json", "issue": "expo-camera ~57.0.4 is still declared as a dependency but there is no in-app QR scanner. Consider removing to shrink web bundle. Reference: /app/frontend/package.json"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_recipients.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: remove unused expo-camera dependency from /app/frontend/package.json.",
+    "getDeviceId race condition was fixed in /app/frontend/src/utils/device.ts by caching the in-flight promise. Please review the fix and keep it \u2014 it prevents divergent device ids between concurrent callers (whoami vs claim vs alarms/active). Without this, a fresh phone loading Settings would sometimes fail to show 'Paired as X' after a successful pair."
+  ],
+  "critical_code_review_comments": [
+    "settings.tsx invalidates qk.whoami but the useQuery key is [...qk.whoami, deviceId] \u2014 fine, prefix-match works, but consider consolidating deviceId provisioning into a single useDeviceId() hook to remove the get/set duplication across settings, home, pair and AlarmOverlay.",
+    "pair.tsx does router.replace to (tabs)/home after 1.2s but the whoami query on home uses refetchInterval, so the first render can flash 'Not paired' before flipping to 'Paired: <name>'. Consider awaiting qc.refetchQueries({ queryKey: qk.whoami }) before navigating.",
+    "alarms/active fail-safe: unregistered device_id and missing device_id both return due alarms. This is correct per spec but worth calling out in a comment near the endpoint to prevent regressions.",
+    "AlarmOverlay is global and pops over the dashboard whenever any pending alarm is past due; keep clicking alarm-done-button in playbooks before asserting non-overlay UI. Behaviour verified as designed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/test_recipients.py",
+    "/app/frontend/src/utils/device.ts"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Ephemeral: recipients TEST_A/TEST_B/TEST_UI/TEST_Create/TEST_Del/TEST_Regen/TEST_ClaimGuy/TEST_QRGuy/TEST_NoUrl are auto-deleted via fixtures/finally blocks. Existing Dave/Sam recipients preserved; assignment restored to Dave after tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run backend tests sequentially: `pytest -o addopts='' backend/tests/` (25 pass). Parallel xdist can race /api/schedule/manual + /api/settings + /api/schedule/assign singletons. Old /api/pairing GET/regenerate/DELETE are GONE \u2014 use /api/recipients for CRUD, /api/pairing/claim for pairing, /api/pairing/whoami for status, PUT /api/schedule/assign for who's on catch. Alarms gating: paired manager only sees alarms when assigned; unpaired device (and no device_id) always sees them as fail-safe. AlarmOverlay still requires clicking alarm-done-button in loops. getDeviceId now returns a cached promise \u2014 concurrent callers on the same page share the id.",
+  "rca_of_issue": "Symptom: after entering a valid pairing code on mobile Settings, `paired-as` never appeared and Home's `paired-chip` sometimes showed 'Not paired' even though POST /api/pairing/claim returned 200. Reproduction: clear localStorage, load /(tabs)/settings, enter a manager code, tap Pair. Root cause: /app/frontend/src/utils/device.ts::getDeviceId did storage.getItem() and, if missing, generated a fresh uuid and called storage.setItem(); AlarmOverlay, Settings whoami effect, and the claim mutation each called getDeviceId concurrently on cold storage, generating 2-3 different ids in parallel; last-write-wins in AsyncStorage, so one component (claim) posted device_id A while another (whoami useQuery) polled device_id B \u2014 the backend correctly returned paired:false for the losing id. Fix: cache the in-flight Promise at module scope so all concurrent callers await and receive the same id; subsequent calls short-circuit via the cached promise. Re-tested end-to-end: settings shows 'Paired as Sam', home shows 'Paired: Sam', auto-pair /pair?code redirects and home reflects the pair."
+}

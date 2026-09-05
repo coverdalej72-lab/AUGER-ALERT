@@ -13,8 +13,13 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, date, time, timedelta, timezone
 
+import json
+import asyncio
+
 import pandas as pd
 import qrcode
+from pywebpush import webpush, WebPushException
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from timing import compute_shed_timing, parse_time_value, parse_date_value, get_tz
 
@@ -25,6 +30,10 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:alerts@feedwithdrawal.app")
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -419,6 +428,9 @@ def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: d
                 alarm["status"] = "acknowledged"
                 alarm["acknowledged_at"] = old.get("acknowledged_at")
                 alarm["alert_count"] = old.get("alert_count", 0)
+            if old:
+                alarm["push_count"] = old.get("push_count", 0)
+                alarm["last_pushed_at"] = old.get("last_pushed_at")
             alarms.append(alarm)
     return alarms
 
@@ -504,6 +516,8 @@ async def _create_schedule(entries, filename, base_date, settings, note=""):
         "created_at": iso_now(),
         "active": True,
         "delay_min": 0,
+        "assigned_to": None,
+        "assigned_name": None,
         "base": serialize_base(entries),
         "sheds": sheds,
         "farms": farms,
@@ -596,7 +610,7 @@ async def set_delay(update: DelayUpdate):
 
 
 # ---------------------------------------------------------------------------
-# Routes: pairing
+# Routes: managers (recipients) + pairing + assignment
 # ---------------------------------------------------------------------------
 
 def make_qr_data_url(payload: str) -> str:
@@ -610,75 +624,128 @@ def make_qr_data_url(payload: str) -> str:
     return f"data:image/png;base64,{b64}"
 
 
-async def get_pairing_doc(create=True) -> Optional[dict]:
-    doc = await db.pairing.find_one({"id": PAIRING_ID})
-    if not doc and create:
-        doc = {
-            "id": PAIRING_ID,
-            "code": f"{secrets.randbelow(1000000):06d}",
-            "token": secrets.token_urlsafe(24),
-            "paired": False,
-            "device_id": None,
-            "device_name": None,
-            "paired_at": None,
-            "created_at": iso_now(),
-        }
-        await db.pairing.insert_one({**doc})
-    if doc:
-        clean(doc)
-    return doc
+def new_code() -> str:
+    return f"{secrets.randbelow(1000000):06d}"
 
 
-@api_router.get("/pairing")
-async def pairing_status(app_url: Optional[str] = None):
-    doc = await get_pairing_doc(create=True)
+def recipient_public(r: dict, app_url: Optional[str]) -> dict:
     if app_url:
-        payload = f"{app_url.rstrip('/')}/pair?code={doc['code']}"
+        payload = f"{app_url.rstrip('/')}/pair?code={r['code']}"
     else:
-        payload = f"farmtimer://pair?code={doc['code']}&token={doc['token']}"
+        payload = f"farmtimer://pair?code={r['code']}"
     return {
-        "paired": doc["paired"],
-        "code": doc["code"],
-        "device_name": doc.get("device_name"),
-        "paired_at": doc.get("paired_at"),
+        "id": r["id"],
+        "name": r["name"],
+        "paired": r.get("paired", False),
+        "device_name": r.get("device_name"),
+        "paired_at": r.get("paired_at"),
+        "code": r["code"],
         "qr_data_url": make_qr_data_url(payload),
         "payload": payload,
     }
 
 
-@api_router.post("/pairing/regenerate")
-async def pairing_regenerate():
-    doc = {
-        "id": PAIRING_ID,
-        "code": f"{secrets.randbelow(1000000):06d}",
-        "token": secrets.token_urlsafe(24),
-        "paired": False,
+class RecipientCreate(BaseModel):
+    name: str
+
+
+class AssignRequest(BaseModel):
+    recipient_id: Optional[str] = None
+
+
+@api_router.get("/recipients")
+async def list_recipients(app_url: Optional[str] = None):
+    docs = await db.recipients.find({"active": True}).sort("created_at", 1).to_list(100)
+    return [recipient_public(clean(r), app_url) for r in docs]
+
+
+@api_router.post("/recipients")
+async def create_recipient(req: RecipientCreate, app_url: Optional[str] = None):
+    r = {
+        "id": str(uuid.uuid4()),
+        "name": (req.name or "").strip() or "Manager",
+        "code": new_code(),
         "device_id": None,
         "device_name": None,
+        "paired": False,
         "paired_at": None,
+        "active": True,
         "created_at": iso_now(),
     }
-    await db.pairing.update_one({"id": PAIRING_ID}, {"$set": doc}, upsert=True)
-    return await pairing_status()
+    await db.recipients.insert_one({**r})
+    return recipient_public(r, app_url)
+
+
+@api_router.delete("/recipients/{rid}")
+async def delete_recipient(rid: str):
+    await db.recipients.update_one({"id": rid}, {"$set": {"active": False}})
+    await db.schedules.update_many({"assigned_to": rid}, {"$set": {"assigned_to": None, "assigned_name": None}})
+    return {"ok": True}
+
+
+@api_router.post("/recipients/{rid}/regenerate")
+async def regen_recipient(rid: str, app_url: Optional[str] = None):
+    r = await db.recipients.find_one({"id": rid})
+    if not r:
+        raise HTTPException(404, "Manager not found")
+    await db.recipients.update_one({"id": rid}, {"$set": {
+        "code": new_code(), "device_id": None, "device_name": None, "paired": False, "paired_at": None,
+    }})
+    r = await db.recipients.find_one({"id": rid})
+    return recipient_public(clean(r), app_url)
 
 
 @api_router.post("/pairing/claim")
 async def pairing_claim(req: ClaimRequest):
-    doc = await get_pairing_doc(create=True)
-    if req.code.strip() != doc["code"]:
-        raise HTTPException(400, "Incorrect pairing code. Check the code on your desktop.")
-    await db.pairing.update_one({"id": PAIRING_ID}, {"$set": {
-        "paired": True,
+    r = await db.recipients.find_one({"code": req.code.strip(), "active": True})
+    if not r:
+        raise HTTPException(400, "Incorrect pairing code. Check the control centre.")
+    # a phone can only be one manager at a time
+    await db.recipients.update_many({"device_id": req.device_id}, {"$set": {"device_id": None, "paired": False}})
+    await db.recipients.update_one({"id": r["id"]}, {"$set": {
         "device_id": req.device_id,
         "device_name": req.device_name or "Phone",
+        "paired": True,
         "paired_at": iso_now(),
     }})
-    return {"ok": True, "token": doc["token"], "device_name": req.device_name or "Phone"}
+    return {"ok": True, "recipient_id": r["id"], "name": r["name"]}
 
 
-@api_router.delete("/pairing")
-async def pairing_unpair():
-    return await pairing_regenerate()
+@api_router.get("/pairing/whoami")
+async def whoami(device_id: Optional[str] = None):
+    if not device_id:
+        return {"paired": False}
+    r = await db.recipients.find_one({"device_id": device_id, "active": True, "paired": True})
+    if not r:
+        return {"paired": False}
+    sched = await db.schedules.find_one({"active": True})
+    assigned = bool(sched and sched.get("assigned_to") == r["id"])
+    return {
+        "paired": True,
+        "recipient_id": r["id"],
+        "name": r["name"],
+        "assigned": assigned,
+        "assigned_name": (sched.get("assigned_name") if sched else None),
+    }
+
+
+@api_router.put("/schedule/assign")
+async def assign_schedule(req: AssignRequest):
+    sched = await db.schedules.find_one({"active": True})
+    if not sched:
+        raise HTTPException(404, "No active schedule to assign.")
+    name = None
+    if req.recipient_id:
+        r = await db.recipients.find_one({"id": req.recipient_id, "active": True})
+        if not r:
+            raise HTTPException(404, "Manager not found")
+        name = r["name"]
+    await db.schedules.update_one({"id": sched["id"]}, {"$set": {
+        "assigned_to": req.recipient_id, "assigned_name": name,
+    }})
+    return await latest_schedule()
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -712,7 +779,7 @@ async def list_alarms(schedule_id: Optional[str] = None):
 
 
 @api_router.get("/alarms/active")
-async def active_alarms():
+async def active_alarms(device_id: Optional[str] = None):
     settings = await get_settings_doc()
     now = now_utc()
     sched = await db.schedules.find_one({"active": True})
@@ -720,6 +787,13 @@ async def active_alarms():
             "realert_max": settings["realert_max"]}
     if not sched:
         return base
+    # A phone paired to a manager only rings when the active schedule is
+    # assigned to that manager. Unpaired devices (the desktop) always see due
+    # alarms as a fail-safe.
+    if device_id:
+        r = await db.recipients.find_one({"device_id": device_id, "active": True, "paired": True})
+        if r and sched.get("assigned_to") != r["id"]:
+            return base
     docs = await db.alarms.find({"schedule_id": sched["id"], "status": "pending"}).to_list(1000)
     due = [clean(a) for a in docs if parse_iso(a["fire_at_utc"]) <= now]
     due.sort(key=lambda a: a["fire_at_utc"])
@@ -761,6 +835,151 @@ async def alarm_log(limit: int = 100):
 
 
 # ---------------------------------------------------------------------------
+# Routes: web push (reliable phone-browser alarms, incl. locked screen)
+# ---------------------------------------------------------------------------
+
+class PushSubscribe(BaseModel):
+    device_id: str
+    subscription: dict
+
+
+@api_router.get("/push/vapid-public")
+async def vapid_public():
+    return {"public_key": VAPID_PUBLIC_KEY}
+
+
+@api_router.post("/push/subscribe")
+async def push_subscribe(req: PushSubscribe):
+    endpoint = (req.subscription or {}).get("endpoint")
+    if not endpoint:
+        raise HTTPException(400, "Invalid push subscription.")
+    await db.push_subscriptions.update_one(
+        {"endpoint": endpoint},
+        {"$set": {
+            "device_id": req.device_id,
+            "endpoint": endpoint,
+            "subscription": req.subscription,
+            "updated_at": iso_now(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api_router.delete("/push/subscribe/{device_id}")
+async def push_unsubscribe(device_id: str):
+    await db.push_subscriptions.delete_many({"device_id": device_id})
+    return {"ok": True}
+
+
+@api_router.get("/push/status")
+async def push_status(device_id: Optional[str] = None):
+    if not device_id:
+        return {"subscribed": False}
+    n = await db.push_subscriptions.count_documents({"device_id": device_id})
+    return {"subscribed": n > 0}
+
+
+class PushTest(BaseModel):
+    device_id: str
+
+
+@api_router.post("/push/test")
+async def push_test(req: PushTest):
+    if not await db.push_subscriptions.count_documents({"device_id": req.device_id}):
+        raise HTTPException(400, "No push subscription for this device yet.")
+    await _push_to_device(req.device_id, {
+        "title": "Test alarm ✓",
+        "body": "Push notifications are working on this phone.",
+        "tag": "test",
+        "url": "/",
+    })
+    return {"ok": True}
+
+
+def _send_web_push(subscription: dict, payload: dict):
+    """Blocking pywebpush call — run via asyncio.to_thread."""
+    webpush(
+        subscription_info=subscription,
+        data=json.dumps(payload),
+        vapid_private_key=VAPID_PRIVATE_KEY,
+        vapid_claims={"sub": VAPID_SUBJECT},
+        ttl=600,
+    )
+
+
+async def _push_to_device(device_id: str, payload: dict):
+    subs = await db.push_subscriptions.find({"device_id": device_id}).to_list(20)
+    for sub in subs:
+        try:
+            await asyncio.to_thread(_send_web_push, sub["subscription"], payload)
+        except WebPushException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (404, 410):
+                await db.push_subscriptions.delete_one({"_id": sub["_id"]})
+            else:
+                logger.warning("web push failed: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("web push error: %s", exc)
+
+
+async def deliver_due_alarms():
+    """Runs on a timer. Delivers browser push for due, unacknowledged alarms to
+    the phone of the manager who is on catch, then re-alerts on the escalation
+    interval until acknowledged or the max is reached."""
+    try:
+        sched = await db.schedules.find_one({"active": True})
+        if not sched or not sched.get("assigned_to"):
+            return
+        recipient = await db.recipients.find_one(
+            {"id": sched["assigned_to"], "active": True, "paired": True}
+        )
+        if not recipient or not recipient.get("device_id"):
+            return
+        device_id = recipient["device_id"]
+        if not await db.push_subscriptions.count_documents({"device_id": device_id}):
+            return
+
+        settings = await get_settings_doc()
+        interval = timedelta(minutes=max(1, settings["realert_interval_min"]))
+        max_alerts = max(1, settings["realert_max"])
+        now = now_utc()
+
+        docs = await db.alarms.find(
+            {"schedule_id": sched["id"], "status": "pending"}
+        ).to_list(1000)
+        for a in docs:
+            if parse_iso(a["fire_at_utc"]) > now:
+                continue
+            count = a.get("push_count", 0)
+            last = a.get("last_pushed_at")
+            send = False
+            if count == 0:
+                send = True
+            elif count < max_alerts and last and (now - parse_iso(last)) >= interval:
+                send = True
+            if not send:
+                continue
+            payload = {
+                "title": a["title"],
+                "body": f"{a.get('farm') or ''} Shed {a['shed']} · {a['fire_at_local'][11:16]}".strip(),
+                "tag": a["id"],
+                "url": "/",
+            }
+            await _push_to_device(device_id, payload)
+            await db.alarms.update_one(
+                {"id": a["id"]},
+                {"$set": {"push_count": count + 1, "last_pushed_at": iso_now()}},
+            )
+            await log_event(a, "fired" if count == 0 else "escalated")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("deliver_due_alarms error: %s", exc)
+
+
+scheduler = AsyncIOScheduler()
+
+
+# ---------------------------------------------------------------------------
 
 app.include_router(api_router)
 
@@ -773,6 +992,16 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def start_scheduler():
+    scheduler.add_job(deliver_due_alarms, "interval", seconds=15, id="deliver", replace_existing=True)
+    scheduler.start()
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:  # noqa: BLE001
+        pass
     client.close()

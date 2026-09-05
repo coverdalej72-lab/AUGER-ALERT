@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, qk, fetchPairing, type PairingStatus, type Schedule, type Settings } from "@/src/api";
+import { api, qk, type Schedule, type Settings, type Whoami } from "@/src/api";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
+import { PushOptIn } from "@/src/components/PushOptIn";
 import { Icon } from "@/src/components/Icon";
 import { getDeviceId, getDeviceName } from "@/src/utils/device";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -19,10 +19,15 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
 
-  const { data: pairing } = useQuery<PairingStatus>({
-    queryKey: qk.pairing,
-    queryFn: fetchPairing,
-    refetchInterval: 10000,
+  const [deviceId, setDeviceId] = useState("");
+  useEffect(() => {
+    getDeviceId().then(setDeviceId);
+  }, []);
+  const { data: whoami } = useQuery<Whoami>({
+    queryKey: [...qk.whoami, deviceId],
+    queryFn: () => api.get(`/pairing/whoami${deviceId ? `?device_id=${deviceId}` : ""}`),
+    enabled: !!deviceId,
+    refetchInterval: 8000,
   });
   const { data: settings } = useQuery<Settings>({
     queryKey: qk.settings,
@@ -52,14 +57,9 @@ export default function SettingsScreen() {
     onSuccess: () => {
       setPairError(null);
       setCode("");
-      qc.invalidateQueries({ queryKey: qk.pairing });
+      qc.invalidateQueries({ queryKey: qk.whoami });
     },
     onError: (e: Error) => setPairError(e.message),
-  });
-
-  const unpair = useMutation({
-    mutationFn: () => api.del("/pairing"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.pairing }),
   });
 
   const saveSettings = useMutation({
@@ -94,42 +94,54 @@ export default function SettingsScreen() {
         <View>
           <SectionTitle>Phone pairing</SectionTitle>
           <Card testID="pairing-card">
-            <View style={styles.qrBlock}>
-              {pairing?.qr_data_url ? (
-                <Image source={{ uri: pairing.qr_data_url }} style={styles.qrImg} contentFit="contain" testID="settings-qr" />
-              ) : (
-                <View style={styles.qrImg} />
-              )}
-              <Text style={styles.qrCaption}>
-                Scan with any phone camera to open this app in the browser — no Expo, no install.
-              </Text>
-            </View>
-            <View style={styles.divider} />
-            {pairing?.paired ? (
+            {whoami?.paired ? (
               <View style={{ gap: spacing.md }}>
                 <View style={styles.pairedRow}>
                   <View style={styles.pairedIcon}>
-                    <Icon name="cellphone-check" size={26} color={colors.success} />
+                    <Icon name="account-check" size={26} color={colors.success} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.pairedTitle}>Paired to control centre</Text>
-                    <Text style={styles.pairedSub}>{pairing.device_name || "This phone"}</Text>
+                    <Text style={styles.pairedTitle} testID="paired-as">Paired as {whoami.name}</Text>
+                    <Text style={styles.pairedSub}>
+                      {whoami.assigned
+                        ? "You're on catch tonight — alarms are ON"
+                        : "Not on catch tonight — you won't be alarmed"}
+                    </Text>
                   </View>
-                  <Pill label="Active" tone="success" icon="check" />
+                  <Pill
+                    label={whoami.assigned ? "On" : "Off"}
+                    tone={whoami.assigned ? "success" : "neutral"}
+                    icon={whoami.assigned ? "bell-ring" : "bell-off"}
+                  />
                 </View>
+                <Text style={styles.pairHint}>Switch to another manager by entering their code:</Text>
+                <TextInput
+                  value={code}
+                  onChangeText={(t) => {
+                    setCode(t.replace(/\D/g, "").slice(0, 6));
+                    setPairError(null);
+                  }}
+                  placeholder="000000"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="number-pad"
+                  style={styles.codeInput}
+                  maxLength={6}
+                  testID="pairing-code-input"
+                />
+                {pairError ? <Text style={styles.errText} testID="pairing-error">{pairError}</Text> : null}
                 <PrimaryButton
-                  label="Unpair this phone"
-                  icon="link-off"
-                  tone="danger"
-                  onPress={() => unpair.mutate()}
-                  testID="unpair-button"
+                  label={claim.isPending ? "Switching…" : "Switch manager"}
+                  icon="account-switch"
+                  onPress={() => code.length >= 4 && claim.mutate(code)}
+                  disabled={code.length < 4 || claim.isPending}
+                  testID="pair-button"
                 />
               </View>
             ) : (
               <View style={{ gap: spacing.md }}>
                 <Text style={styles.pairHint}>
-                  Open the control centre on your PC, go to the pairing panel, and enter the 6-digit
-                  code shown there.
+                  Enter the code the control centre shows for you. You only pair once — it stays
+                  paired, and you&apos;ll be alarmed on the nights you&apos;re assigned.
                 </Text>
                 <TextInput
                   value={code}
@@ -144,13 +156,9 @@ export default function SettingsScreen() {
                   maxLength={6}
                   testID="pairing-code-input"
                 />
-                {pairError ? (
-                  <Text style={styles.errText} testID="pairing-error">
-                    {pairError}
-                  </Text>
-                ) : null}
+                {pairError ? <Text style={styles.errText} testID="pairing-error">{pairError}</Text> : null}
                 <PrimaryButton
-                  label={claim.isPending ? "Pairing…" : "Pair phone"}
+                  label={claim.isPending ? "Pairing…" : "Pair this phone"}
                   icon="cellphone-link"
                   onPress={() => code.length >= 4 && claim.mutate(code)}
                   disabled={code.length < 4 || claim.isPending}
@@ -159,6 +167,12 @@ export default function SettingsScreen() {
               </View>
             )}
           </Card>
+        </View>
+
+        {/* Push alarms */}
+        <View>
+          <SectionTitle>Alarm notifications</SectionTitle>
+          <PushOptIn />
         </View>
 
         {/* My farms */}
