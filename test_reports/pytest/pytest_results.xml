@@ -1,1 +1,138 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="47" time="20.007" timestamp="2026-09-05T08:18:29.568674+00:00" hostname="agent-env-39d0d243-1be9-4029-bab3-bc0363310c50"><testcase classname="tests.backend_test.TestSettings" name="test_defaults" time="0.190" /><testcase classname="tests.backend_test.TestSettings" name="test_update_recomputes_schedule" time="0.205" /><testcase classname="tests.backend_test.TestManualSchedule" name="test_anchor_timings" time="0.106" /><testcase classname="tests.backend_test.TestManualSchedule" name="test_empty_body_400" time="0.049" /><testcase classname="tests.backend_test.TestUpload" name="test_upload_csv_valid" time="0.094" /><testcase classname="tests.backend_test.TestUpload" name="test_upload_bad_no_time_column" time="0.127" /><testcase classname="tests.backend_test.TestScheduleLatest" name="test_latest_and_sorted_alarms" time="0.101" /><testcase classname="tests.backend_test.TestPairingClaim" name="test_wrong_code_400" time="0.048" /><testcase classname="tests.backend_test.TestPairingClaim" name="test_claim_then_whoami" time="0.224" /><testcase classname="tests.backend_test.TestAlarms" name="test_active_ack_escalate_log" time="0.801" /><testcase classname="tests.backend_test.TestAlarms" name="test_ack_not_found" time="0.060" /><testcase classname="tests.test_billing.TestBillingPlan" name="test_plan_catalog" time="0.091" /><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_checkout_returns_stripe_url_and_writes_unpaid_tx" time="0.420" /><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_tamper_resistance_client_amount_ignored" time="0.387" /><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_checkout_bad_email_400" time="0.040" /><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_checkout_unknown_product_400" time="0.041" /><testcase classname="tests.test_billing.TestCheckoutStatus" name="test_unknown_session_404" time="0.041" /><testcase classname="tests.test_billing.TestCheckoutStatus" name="test_unpaid_session_stays_unpaid_and_no_pass_granted" time="0.720" /><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_demo_email_active" time="0.043" /><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_unknown_email_inactive" time="0.042" /><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_no_email_inactive" time="0.041" /><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_email_case_normalisation" time="0.045" /><testcase classname="tests.test_new_features.TestMyFarms" name="test_settings_has_my_farms" time="0.100" /><testcase classname="tests.test_new_features.TestMyFarms" name="test_update_my_farms" time="0.130" /><testcase classname="tests.test_new_features.TestDelay" name="test_delay_shifts_from_base" time="0.273" /><testcase classname="tests.test_new_features.TestDelay" name="test_latest_has_delay_and_base" time="0.083" /><testcase classname="tests.test_new_features.TestPairingAppUrl" name="test_recipient_with_app_url" time="0.087" /><testcase classname="tests.test_new_features.TestPairingAppUrl" name="test_recipient_without_app_url" time="0.128" /><testcase classname="tests.test_new_features.TestMultiFarmArming" name="test_farms_present_only_selected_arm" time="0.280" /><testcase classname="tests.test_push.TestVapidPublic" name="test_vapid_public_returns_key" time="0.162" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_status_empty_without_id" time="0.039" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_status_false_before_subscribe" time="0.039" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_subscribe_then_status_then_unsubscribe" time="0.293" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_subscribe_missing_endpoint_400" time="0.039" /><testcase classname="tests.test_push.TestPushTest" name="test_push_test_400_when_no_subscription" time="0.040" /><testcase classname="tests.test_push.TestPushTest" name="test_push_test_graceful_when_endpoint_unreachable" time="0.129" /><testcase classname="tests.test_push.TestSchedulerGating" name="test_gating_by_assignment" time="1.739" /><testcase classname="tests.test_push.TestSchedulerStability" name="test_backend_still_up_after_scheduler_ticks" time="9.163" /><testcase classname="tests.test_push.TestRegression" name="test_manual_schedule_delay_assign_ack_log" time="0.425" /><testcase classname="tests.test_push.TestRegression" name="test_upload_csv_regression" time="0.151" /><testcase classname="tests.test_recipients.TestRecipientsCRUD" name="test_create_and_list" time="0.222" /><testcase classname="tests.test_recipients.TestRecipientsCRUD" name="test_delete_soft_removes" time="0.154" /><testcase classname="tests.test_recipients.TestRecipientsCRUD" name="test_regenerate_changes_code_and_unpairs" time="0.300" /><testcase classname="tests.test_recipients.TestDeviceSingleManager" name="test_device_moves_between_managers" time="0.352" /><testcase classname="tests.test_recipients.TestAssign" name="test_assign_and_clear" time="0.455" /><testcase classname="tests.test_recipients.TestAssign" name="test_assign_bad_recipient_404" time="0.093" /><testcase classname="tests.test_recipients.TestAlarmsGating" name="test_gating_only_assigned_manager_gets_alarms" time="1.063" /></testsuite></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="36" skipped="0" tests="82" time="92.121" timestamp="2026-09-05T12:07:58.306521+00:00" hostname="agent-env-39d0d243-1be9-4029-bab3-bc0363310c50"><testcase classname="tests.backend_test.TestSettings" name="test_defaults" time="0.148"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:38: in test_defaults
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestSettings" name="test_update_recomputes_schedule" time="0.055"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:52: in test_update_recomputes_schedule
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestManualSchedule" name="test_anchor_timings" time="0.104"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:84: in test_anchor_timings
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestManualSchedule" name="test_empty_body_400" time="0.050"><failure message="assert 401 == 400&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:108: in test_empty_body_400
+    assert r.status_code == 400
+E   assert 401 == 400
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestUpload" name="test_upload_csv_valid" time="0.088"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:118: in test_upload_csv_valid
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestUpload" name="test_upload_bad_no_time_column" time="0.130"><failure message="assert 401 == 400&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:127: in test_upload_bad_no_time_column
+    assert r.status_code == 400
+E   assert 401 == 400
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestScheduleLatest" name="test_latest_and_sorted_alarms" time="0.103"><failure message="assert None is not None">backend/tests/backend_test.py:140: in test_latest_and_sorted_alarms
+    assert body["schedule"] is not None
+E   assert None is not None</failure></testcase><testcase classname="tests.backend_test.TestPairingClaim" name="test_wrong_code_400" time="0.053" /><testcase classname="tests.backend_test.TestPairingClaim" name="test_claim_then_whoami" time="0.052"><failure message="KeyError: 'code'">backend/tests/backend_test.py:157: in test_claim_then_whoami
+    code = rc["code"]; rid = rc["id"]
+           ^^^^^^^^^^
+E   KeyError: 'code'</failure></testcase><testcase classname="tests.backend_test.TestAlarms" name="test_active_ack_escalate_log" time="0.053"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/backend_test.py:178: in test_active_ack_escalate_log
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.backend_test.TestAlarms" name="test_ack_not_found" time="0.053" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_register_returns_token" time="0.386" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_register_duplicate_409" time="0.445" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_register_short_password_400" time="0.104" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_login_success_and_wrong_password_401" time="1.047" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_login_nonexistent_email_401" time="0.117" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_me_bearer_valid" time="0.431" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_me_missing_token_401" time="0.117" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_me_garbage_token_401" time="0.114" /><testcase classname="tests.test_auth_multitenant.TestAuth" name="test_me_wrong_scheme_401" time="0.456" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[GET-/settings]" time="0.091" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[PUT-/settings]" time="0.101" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[POST-/upload]" time="0.184" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[POST-/schedule/manual]" time="0.107" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[GET-/schedules]" time="0.119" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[DELETE-/schedule/some-fake-id]" time="0.111" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[PUT-/schedule/delay]" time="0.109" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[PUT-/schedule/assign]" time="0.100" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[GET-/recipients]" time="0.150" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[POST-/recipients]" time="0.115" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[DELETE-/recipients/some-fake-id]" time="0.103" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[GET-/alarms]" time="0.101" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[GET-/alarms/log]" time="35.901" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[GET-/season-pass/status]" time="36.253" /><testcase classname="tests.test_auth_multitenant.TestProtectedRoutes" name="test_requires_bearer[POST-/payments/checkout]" time="0.218" /><testcase classname="tests.test_auth_multitenant.TestTenantIsolation" name="test_a_creates_data_b_cannot_see" time="2.638" /><testcase classname="tests.test_auth_multitenant.TestManagerDeviceFlow" name="test_device_flow_and_gating" time="2.552" /><testcase classname="tests.test_auth_multitenant.TestManagerDeviceFlow" name="test_pairing_claim_wrong_code_400" time="0.104" /><testcase classname="tests.test_auth_multitenant.TestBilling" name="test_billing_plan" time="0.089" /><testcase classname="tests.test_auth_multitenant.TestBilling" name="test_checkout_uses_token_email_not_body" time="1.288" /><testcase classname="tests.test_auth_multitenant.TestBilling" name="test_season_pass_status_per_tenant" time="0.905" /><testcase classname="tests.test_auth_multitenant.TestBilling" name="test_seeded_double_bb_login" time="0.461" /><testcase classname="tests.test_auth_multitenant.TestRegressionAuth" name="test_upload_with_token" time="0.544" /><testcase classname="tests.test_auth_multitenant.TestRegressionAuth" name="test_delay_non_compounding" time="1.127" /><testcase classname="tests.test_auth_multitenant.TestRegressionAuth" name="test_push_endpoints_unauth_still_work" time="0.759" /><testcase classname="tests.test_billing.TestBillingPlan" name="test_plan_catalog" time="0.157" /><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_checkout_returns_stripe_url_and_writes_unpaid_tx" time="0.080"><failure message="AssertionError: {&quot;detail&quot;:&quot;Please sign in.&quot;}&#10;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:74: in test_checkout_returns_stripe_url_and_writes_unpaid_tx
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Please sign in."}
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_tamper_resistance_client_amount_ignored" time="0.070"><failure message="AssertionError: {&quot;detail&quot;:&quot;Please sign in.&quot;}&#10;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:111: in test_tamper_resistance_client_amount_ignored
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Please sign in."}
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_checkout_bad_email_400" time="0.068"><failure message="assert 401 == 400&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:134: in test_checkout_bad_email_400
+    assert r.status_code == 400
+E   assert 401 == 400
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestCheckoutCreate" name="test_checkout_unknown_product_400" time="0.050"><failure message="assert 401 == 400&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:140: in test_checkout_unknown_product_400
+    assert r.status_code == 400
+E   assert 401 == 400
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestCheckoutStatus" name="test_unknown_session_404" time="0.056" /><testcase classname="tests.test_billing.TestCheckoutStatus" name="test_unpaid_session_stays_unpaid_and_no_pass_granted" time="0.052"><failure message="AssertionError: {&quot;detail&quot;:&quot;Please sign in.&quot;}&#10;assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:157: in test_unpaid_session_stays_unpaid_and_no_pass_granted
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Please sign in."}
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_demo_email_active" time="0.062"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:202: in test_demo_email_active
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_unknown_email_inactive" time="0.061"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:212: in test_unknown_email_inactive
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_no_email_inactive" time="0.065"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:219: in test_no_email_inactive
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_billing.TestSeasonPassStatus" name="test_email_case_normalisation" time="0.052"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_billing.py:229: in test_email_case_normalisation
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_new_features.TestMyFarms" name="test_settings_has_my_farms" time="0.120"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_new_features.py:28: in test_settings_has_my_farms
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_new_features.TestMyFarms" name="test_update_my_farms" time="0.060"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_new_features.py:36: in test_update_my_farms
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_new_features.TestDelay" name="test_delay_shifts_from_base" time="0.160"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_new_features.py:61: in test_delay_shifts_from_base
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_new_features.TestDelay" name="test_latest_has_delay_and_base" time="0.113"><failure message="TypeError: argument of type 'NoneType' is not iterable">backend/tests/test_new_features.py:99: in test_latest_has_delay_and_base
+    assert "delay_min" in sched
+           ^^^^^^^^^^^^^^^^^^^^
+E   TypeError: argument of type 'NoneType' is not iterable</failure></testcase><testcase classname="tests.test_new_features.TestPairingAppUrl" name="test_recipient_with_app_url" time="0.057"><failure message="KeyError: 'id'">backend/tests/test_new_features.py:113: in test_recipient_with_app_url
+    assert rc["payload"].startswith("https://example.com/pair?code=")
+           ^^^^^^^^^^^^^
+E   KeyError: 'payload'
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_new_features.py:117: in test_recipient_with_app_url
+    s.delete(f"{API}/recipients/{rc['id']}")
+                                 ^^^^^^^^
+E   KeyError: 'id'</failure></testcase><testcase classname="tests.test_new_features.TestPairingAppUrl" name="test_recipient_without_app_url" time="0.060"><failure message="KeyError: 'id'">backend/tests/test_new_features.py:122: in test_recipient_without_app_url
+    assert rc["payload"].startswith("farmtimer://pair?code=")
+           ^^^^^^^^^^^^^
+E   KeyError: 'payload'
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_new_features.py:124: in test_recipient_without_app_url
+    s.delete(f"{API}/recipients/{rc['id']}")
+                                 ^^^^^^^^
+E   KeyError: 'id'</failure></testcase><testcase classname="tests.test_new_features.TestMultiFarmArming" name="test_farms_present_only_selected_arm" time="0.147"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_new_features.py:139: in test_farms_present_only_selected_arm
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_push.TestVapidPublic" name="test_vapid_public_returns_key" time="0.105" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_status_empty_without_id" time="0.050" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_status_false_before_subscribe" time="0.052" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_subscribe_then_status_then_unsubscribe" time="0.296" /><testcase classname="tests.test_push.TestPushSubscribeLifecycle" name="test_subscribe_missing_endpoint_400" time="0.050" /><testcase classname="tests.test_push.TestPushTest" name="test_push_test_400_when_no_subscription" time="0.049" /><testcase classname="tests.test_push.TestPushTest" name="test_push_test_graceful_when_endpoint_unreachable" time="0.147" /><testcase classname="tests.test_push.TestSchedulerGating" name="test_gating_by_assignment" time="0.105"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_push.py:146: in test_gating_by_assignment
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_push.TestSchedulerStability" name="test_backend_still_up_after_scheduler_ticks" time="0.051"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_push.py:209: in test_backend_still_up_after_scheduler_ticks
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_push.TestRegression" name="test_manual_schedule_delay_assign_ack_log" time="0.050"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_push.py:224: in test_manual_schedule_delay_assign_ack_log
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_push.TestRegression" name="test_upload_csv_regression" time="0.095"><failure message="assert 401 == 200&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_push.py:258: in test_upload_csv_regression
+    assert r.status_code == 200
+E   assert 401 == 200
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_recipients.TestRecipientsCRUD" name="test_create_and_list" time="0.097"><failure message="KeyError: 'id'">backend/tests/test_recipients.py:40: in test_create_and_list
+    assert rc["id"]
+           ^^^^^^^^
+E   KeyError: 'id'
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_recipients.py:51: in test_create_and_list
+    s.delete(f"{API}/recipients/{rc['id']}")
+                                 ^^^^^^^^
+E   KeyError: 'id'</failure></testcase><testcase classname="tests.test_recipients.TestRecipientsCRUD" name="test_delete_soft_removes" time="0.043"><failure message="KeyError: 'id'">backend/tests/test_recipients.py:55: in test_delete_soft_removes
+    r = s.delete(f"{API}/recipients/{rc['id']}")
+                                     ^^^^^^^^
+E   KeyError: 'id'</failure></testcase><testcase classname="tests.test_recipients.TestRecipientsCRUD" name="test_regenerate_changes_code_and_unpairs" time="0.043"><failure message="KeyError: 'id'">backend/tests/test_recipients.py:64: in test_regenerate_changes_code_and_unpairs
+    s.post(f"{API}/pairing/claim", json={"code": rc["code"], "device_id": "TEST_dev_regen", "device_name": "P"})
+                                                 ^^^^^^^^^^
+E   KeyError: 'code'
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_recipients.py:75: in test_regenerate_changes_code_and_unpairs
+    s.delete(f"{API}/recipients/{rc['id']}")
+                                 ^^^^^^^^
+E   KeyError: 'id'</failure></testcase><testcase classname="tests.test_recipients.TestDeviceSingleManager" name="test_device_moves_between_managers" time="0.088"><failure message="KeyError: 'code'">backend/tests/test_recipients.py:84: in test_device_moves_between_managers
+    s.post(f"{API}/pairing/claim", json={"code": a["code"], "device_id": dev, "device_name": "P"})
+                                                 ^^^^^^^^^
+E   KeyError: 'code'</failure></testcase><testcase classname="tests.test_recipients.TestAssign" name="test_assign_and_clear" time="0.042"><failure message="KeyError: 'id'">backend/tests/test_recipients.py:107: in test_assign_and_clear
+    r = s.put(f"{API}/schedule/assign", json={"recipient_id": a["id"]})
+                                                              ^^^^^^^
+E   KeyError: 'id'</failure></testcase><testcase classname="tests.test_recipients.TestAssign" name="test_assign_bad_recipient_404" time="0.085"><failure message="assert 401 == 404&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_recipients.py:131: in test_assign_bad_recipient_404
+    assert r.status_code == 404
+E   assert 401 == 404
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase><testcase classname="tests.test_recipients.TestAlarmsGating" name="test_gating_only_assigned_manager_gets_alarms" time="0.542"><failure message="KeyError: 'code'">backend/tests/test_recipients.py:144: in test_gating_only_assigned_manager_gets_alarms
+    s.post(f"{API}/pairing/claim", json={"code": a["code"], "device_id": "TEST_devA2", "device_name": "PA"})
+                                                 ^^^^^^^^^
+E   KeyError: 'code'</failure></testcase><testcase classname="tests.test_recipients.TestAlarmsGating" name="test_gating_only_assigned_manager_gets_alarms" time="0.001"><error message="failed on teardown with &quot;KeyError: 'id'&quot;">backend/tests/test_recipients.py:30: in two_managers
+    s.delete(f"{API}/recipients/{a['id']}")
+                                 ^^^^^^^
+E   KeyError: 'id'</error></testcase></testsuite></testsuites>

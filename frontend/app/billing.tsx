@@ -3,7 +3,6 @@ import { ActivityIndicator, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { fetchPaymentStatus } from "@/src/api";
-import { setBillingEmail } from "@/src/utils/billing";
 import { Icon } from "@/src/components/Icon";
 import { PrimaryButton } from "@/src/components/ui";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -32,7 +31,6 @@ export default function BillingReturn() {
         const r = await fetchPaymentStatus(sessionId);
         if (stopped) return;
         if (r.payment_status === "paid" && r.fulfilled) {
-          if (r.email) await setBillingEmail(r.email);
           setPhase("paid");
           setTimeout(() => {
             if (!stopped) router.replace("/dashboard");

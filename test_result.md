@@ -1,3 +1,12 @@
+## AUTH + MULTI-TENANCY (email+password accounts) — NEWEST
+- Every grower's data (settings, schedules, alarms, recipients, log, season pass) is scoped by
+  `owner` = account email. Managers stay device-based; they pair and resolve their grower via the
+  recipient's `owner`. Auth: POST /api/auth/register, /api/auth/login, GET /api/auth/me (Bearer).
+- Verified locally: no token=401, register A/B, A's schedule invisible to B, bad token=401.
+- Frontend verified on screen: /dashboard -> Sign in -> login -> private empty Control Centre.
+- Accounts: doublebb@baqerifarming.com.au/DoubleB2026 and demo@feedwithdrawal.app/demo123456.
+
+
 #====================================================================================================
 # START - Testing Protocol - DO NOT EDIT OR REMOVE THIS SECTION
 #====================================================================================================

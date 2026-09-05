@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { useState } from "react";
+import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 
@@ -18,55 +18,30 @@ function money(amount: number, currency: string): string {
 }
 
 export function Paywall({
-  savedEmail,
-  onSetEmail,
+  accountEmail,
+  onLogout,
+  onChecked,
 }: {
-  savedEmail: string;
-  onSetEmail: (email: string) => Promise<void>;
+  accountEmail: string;
+  onLogout: () => void;
+  onChecked: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
-  const [email, setEmail] = useState(savedEmail);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (savedEmail) setEmail(savedEmail);
-  }, [savedEmail]);
-
   const { data: plan } = useQuery<BillingPlan>({ queryKey: ["billing", "plan"], queryFn: fetchPlan });
 
-  const valid = /\S+@\S+\.\S+/.test(email.trim());
-
   const buy = async () => {
-    if (!valid) {
-      setMsg("Enter a valid email address.");
-      return;
-    }
     setBusy(true);
     setMsg(null);
     try {
-      await onSetEmail(email);
-      const { url } = await startCheckout(email.trim().toLowerCase());
+      const { url } = await startCheckout();
       if (typeof window !== "undefined") window.location.assign(url);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Could not start checkout.");
-      setBusy(false);
-    }
-  };
-
-  const restore = async () => {
-    if (!valid) {
-      setMsg("Enter the email you paid with.");
-      return;
-    }
-    setBusy(true);
-    setMsg(null);
-    try {
-      await onSetEmail(email);
-      setMsg("Checking… if you've paid with this email, access unlocks in a moment.");
-    } finally {
       setBusy(false);
     }
   };
@@ -100,24 +75,11 @@ export function Paywall({
           ))}
         </Card>
 
-        <Text style={styles.label}>Your email</Text>
-        <TextInput
-          value={email}
-          onChangeText={(t) => {
-            setEmail(t);
-            setMsg(null);
-          }}
-          placeholder="you@farm.com"
-          placeholderTextColor={colors.muted}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={styles.input}
-          testID="billing-email"
-        />
-        <Text style={styles.fine}>
-          We use your email only to remember your access on this browser. No password.
-        </Text>
+        <Text style={styles.label}>Signed in as</Text>
+        <View style={styles.acctRow}>
+          <Icon name="account-circle" size={20} color={colors.brandPrimary} />
+          <Text style={styles.acct} numberOfLines={1}>{accountEmail}</Text>
+        </View>
 
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
 
@@ -133,10 +95,11 @@ export function Paywall({
             label="I've already paid — check access"
             icon="refresh"
             tone="ghost"
-            onPress={restore}
+            onPress={onChecked}
             disabled={busy}
             testID="billing-restore"
           />
+          <PrimaryButton label="Sign out" icon="logout" tone="ghost" onPress={onLogout} testID="billing-logout" />
         </View>
 
         <Text style={styles.secure}>Secure payment · powered by Stripe</Text>
@@ -161,6 +124,12 @@ const useStyles = makeStyles((colors) => ({
   featureRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   featureText: { fontFamily: fonts.text, color: colors.onSurfaceSecondary, fontSize: 14, flex: 1 },
   label: { fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 14, marginTop: spacing.lg, marginBottom: spacing.xs },
+  acctRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: colors.surfaceTertiary, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+  },
+  acct: { flex: 1, fontFamily: fonts.textSemiBold, color: colors.onSurface, fontSize: 15 },
   input: {
     fontFamily: fonts.text,
     color: colors.onSurface,

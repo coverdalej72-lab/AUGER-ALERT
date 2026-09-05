@@ -3,14 +3,14 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { Image } from "expo-image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, API, qk, appOrigin, fetchRecipients, fetchPassStatus, type Alarm, type PassStatus, type Recipient, type Schedule, type Settings } from "@/src/api";
+import { api, API, qk, appOrigin, fetchRecipients, fetchPassStatus, initAuth, getToken, clearToken, fetchMe, type Alarm, type PassStatus, type Recipient, type Schedule, type Settings } from "@/src/api";
 import { dateLabel, hhmm } from "@/src/format";
 import { Card, Pill, PrimaryButton, SectionTitle, Stepper, fmtMins } from "@/src/components/ui";
 import { FarmManager } from "@/src/components/FarmManager";
 import { Paywall } from "@/src/components/Paywall";
+import { AuthScreen } from "@/src/components/AuthScreen";
 import { ShareApp } from "@/src/components/ShareApp";
 import { Icon } from "@/src/components/Icon";
-import { getBillingEmail, setBillingEmail } from "@/src/utils/billing";
 import { testAlarmSound } from "@/src/utils/sound";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
@@ -46,36 +46,51 @@ async function pickAndUpload(): Promise<FormData | null> {
 export default function Dashboard() {
   const { colors } = useTheme();
   const qc = useQueryClient();
-  const [email, setEmailState] = useState<string | null>(null);
+  const [authState, setAuthState] = useState<"loading" | "out" | "in">("loading");
+  const [email, setEmail] = useState<string>("");
 
   useEffect(() => {
-    getBillingEmail().then(setEmailState);
+    (async () => {
+      await initAuth();
+      if (!getToken()) {
+        setAuthState("out");
+        return;
+      }
+      try {
+        const me = await fetchMe();
+        setEmail(me.email);
+        setAuthState("in");
+      } catch {
+        await clearToken();
+        setAuthState("out");
+      }
+    })();
   }, []);
 
-  const setEmail = useCallback(
-    async (e: string) => {
-      const n = e.trim().toLowerCase();
-      await setBillingEmail(n);
-      setEmailState(n);
-      qc.invalidateQueries({ queryKey: qk.pass });
+  const onAuthed = useCallback(
+    async (em: string) => {
+      setEmail(em);
+      setAuthState("in");
+      qc.clear();
     },
     [qc],
   );
 
   const logout = useCallback(async () => {
-    await setBillingEmail("");
-    setEmailState("");
+    await clearToken();
+    setEmail("");
+    setAuthState("out");
     qc.clear();
   }, [qc]);
 
   const { data: pass, isLoading } = useQuery<PassStatus>({
     queryKey: [...qk.pass, email],
-    queryFn: () => fetchPassStatus(email as string),
-    enabled: !!email,
+    queryFn: fetchPassStatus,
+    enabled: authState === "in",
     refetchInterval: 15000,
   });
 
-  if (email === null || (email && isLoading && !pass)) {
+  if (authState === "loading" || (authState === "in" && isLoading && !pass)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator size="large" color={colors.brandPrimary} />
@@ -83,9 +98,17 @@ export default function Dashboard() {
     );
   }
 
-  if (email && pass?.active) return <DashboardInner accountEmail={email} onLogout={logout} />;
+  if (authState === "out") return <AuthScreen onAuthed={onAuthed} />;
 
-  return <Paywall savedEmail={email || ""} onSetEmail={setEmail} />;
+  if (pass?.active) return <DashboardInner accountEmail={email} onLogout={logout} />;
+
+  return (
+    <Paywall
+      accountEmail={email}
+      onLogout={logout}
+      onChecked={() => qc.invalidateQueries({ queryKey: qk.pass })}
+    />
+  );
 }
 
 function DashboardInner({ accountEmail, onLogout }: { accountEmail: string; onLogout: () => void }) {

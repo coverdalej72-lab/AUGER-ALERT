@@ -37,6 +37,7 @@ export default function LogScreen() {
     queryKey: qk.log,
     queryFn: () => api.get("/alarms/log"),
     refetchInterval: 10000,
+    retry: false,
   });
 
   const log = data ?? [];

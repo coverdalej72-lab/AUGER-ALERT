@@ -44,6 +44,7 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    import("@/src/api").then((m) => m.initAuth());
     if (Platform.OS === "web") {
       import("@/src/utils/push").then((m) => {
         m.injectPwaMeta();

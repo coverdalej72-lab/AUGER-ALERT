@@ -32,10 +32,13 @@ export default function SettingsScreen() {
   const { data: settings } = useQuery<Settings>({
     queryKey: qk.settings,
     queryFn: () => api.get("/settings"),
+    retry: false,
   });
   const { data: latest } = useQuery<{ schedule: Schedule | null }>({
-    queryKey: qk.schedule,
-    queryFn: () => api.get("/schedule/latest"),
+    queryKey: [...qk.schedule, deviceId],
+    queryFn: () => api.get(`/schedule/latest${deviceId ? `?device_id=${deviceId}` : ""}`),
+    enabled: !!deviceId,
+    retry: false,
   });
   const availableFarms = latest?.schedule?.farms ?? [];
 

@@ -156,13 +156,14 @@ def parse_iso(s: str) -> datetime:
     return dt
 
 
-async def get_settings_doc() -> dict:
-    doc = await db.settings.find_one({"id": SETTINGS_ID})
+async def get_settings_doc(owner: str) -> dict:
+    doc = await db.settings.find_one({"owner": owner})
     if not doc:
-        await db.settings.insert_one({**DEFAULT_SETTINGS})
-        return {**DEFAULT_SETTINGS}
+        fresh = {**DEFAULT_SETTINGS, "owner": owner}
+        await db.settings.insert_one({**fresh})
+        return fresh
     doc.pop("_id", None)
-    return {**DEFAULT_SETTINGS, **doc}
+    return {**DEFAULT_SETTINGS, **doc, "owner": owner}
 
 
 def clean(doc: dict) -> dict:
@@ -464,7 +465,7 @@ def entries_from_base(base):
     } for b in base]
 
 
-def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: dict, selected_farms):
+def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: dict, selected_farms, owner: str = ""):
     farms_present = any(s.get("farm") for s in sheds)
     selected = set(selected_farms or [])
     alarms = []
@@ -483,6 +484,7 @@ def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: d
             old = preserve.get((s.get("farm", ""), s["shed"], kind))
             alarm = {
                 "id": str(uuid.uuid4()),
+                "owner": owner,
                 "schedule_id": schedule_id,
                 "farm": s.get("farm", ""),
                 "shed": s["shed"],
@@ -507,8 +509,8 @@ def make_alarms(schedule_id: str, sheds: List[dict], settings: dict, preserve: d
     return alarms
 
 
-async def rebuild_active_alarms(settings: dict):
-    sched = await db.schedules.find_one({"active": True})
+async def rebuild_active_alarms(owner: str, settings: dict):
+    sched = await db.schedules.find_one({"owner": owner, "active": True})
     if not sched:
         return
     clean(sched)
@@ -533,7 +535,7 @@ async def rebuild_active_alarms(settings: dict):
         "catch_headsup_min": settings["catch_headsup_min"],
     }}})
     await db.alarms.delete_many({"schedule_id": sched["id"]})
-    alarms = make_alarms(sched["id"], sheds, settings, preserve, selected)
+    alarms = make_alarms(sched["id"], sheds, settings, preserve, selected, owner)
     if alarms:
         await db.alarms.insert_many([{**a} for a in alarms])
 
@@ -560,14 +562,14 @@ async def share_qr(url: str):
 
 
 @api_router.get("/settings", response_model=Settings)
-async def read_settings():
-    s = await get_settings_doc()
+async def read_settings(owner: str = Depends(current_owner)):
+    s = await get_settings_doc(owner)
     return Settings(**{k: s[k] for k in Settings.model_fields})
 
 
 @api_router.put("/settings", response_model=Settings)
-async def update_settings(update: SettingsUpdate):
-    s = await get_settings_doc()
+async def update_settings(update: SettingsUpdate, owner: str = Depends(current_owner)):
+    s = await get_settings_doc(owner)
     changes = {k: v for k, v in update.model_dump().items() if v is not None}
     for k in ("augers_offset_min", "lines_offset_min", "catch_headsup_min"):
         if k in changes and changes[k] < 0:
@@ -577,8 +579,8 @@ async def update_settings(update: SettingsUpdate):
     if "realert_max" in changes:
         changes["realert_max"] = max(1, changes["realert_max"])
     s.update(changes)
-    await db.settings.update_one({"id": SETTINGS_ID}, {"$set": s}, upsert=True)
-    await rebuild_active_alarms(s)
+    await db.settings.update_one({"owner": owner}, {"$set": s}, upsert=True)
+    await rebuild_active_alarms(owner, s)
     return Settings(**{k: s[k] for k in Settings.model_fields})
 
 
@@ -586,14 +588,15 @@ async def update_settings(update: SettingsUpdate):
 # Routes: upload / schedule
 # ---------------------------------------------------------------------------
 
-async def _create_schedule(entries, filename, base_date, settings, note=""):
+async def _create_schedule(entries, filename, base_date, settings, owner, note=""):
     sheds = build_shed_timings(entries, settings, base_date, 0)
     farms = sorted({s.get("farm", "") for s in sheds if s.get("farm")})
     selected = settings.get("my_farms", [])
     schedule_id = str(uuid.uuid4())
-    await db.schedules.update_many({"active": True}, {"$set": {"active": False}})
+    await db.schedules.update_many({"owner": owner, "active": True}, {"$set": {"active": False}})
     doc = {
         "id": schedule_id,
+        "owner": owner,
         "catch_date": base_date.isoformat(),
         "source_filename": filename,
         "note": note,
@@ -612,31 +615,31 @@ async def _create_schedule(entries, filename, base_date, settings, note=""):
         },
     }
     await db.schedules.insert_one({**doc})
-    alarms = make_alarms(schedule_id, sheds, settings, {}, selected)
+    alarms = make_alarms(schedule_id, sheds, settings, {}, selected, owner)
     if alarms:
         await db.alarms.insert_many([{**a} for a in alarms])
     return doc, alarms
 
 
 @api_router.post("/upload")
-async def upload_sheet(file: UploadFile = File(...)):
-    settings = await get_settings_doc()
+async def upload_sheet(file: UploadFile = File(...), owner: str = Depends(current_owner)):
+    settings = await get_settings_doc(owner)
     content = await file.read()
     base_date = date.today()
     entries, note = parse_catch_sheet(file.filename or "sheet", content, base_date)
     dated = [e["catch_date"] for e in entries if e.get("catch_date")]
     if dated:
         base_date = min(dated)
-    doc, alarms = await _create_schedule(entries, file.filename or "sheet", base_date, settings, note)
+    doc, alarms = await _create_schedule(entries, file.filename or "sheet", base_date, settings, owner, note)
     return {"schedule": clean(doc), "alarms": [clean(a) for a in alarms],
             "shed_count": len(doc["sheds"]), "farms": doc["farms"]}
 
 
 @api_router.post("/schedule/manual")
-async def create_manual(sheds: List[ManualShed] = Body(...)):
+async def create_manual(sheds: List[ManualShed] = Body(...), owner: str = Depends(current_owner)):
     if not sheds:
         raise HTTPException(400, "Provide at least one shed.")
-    settings = await get_settings_doc()
+    settings = await get_settings_doc(owner)
     base_date = date.today()
     entries = []
     for s in sheds:
@@ -647,14 +650,15 @@ async def create_manual(sheds: List[ManualShed] = Body(...)):
         cd = parse_date_value(s.catch_date, base_date) if s.catch_date else base_date
         entries.append({"farm": "", "shed": s.shed, "catch_time": ct, "catch_date": cd, "loads": []})
     base_date = min(e["catch_date"] for e in entries)
-    doc, alarms = await _create_schedule(entries, "Manual entry", base_date, settings)
+    doc, alarms = await _create_schedule(entries, "Manual entry", base_date, settings, owner)
     return {"schedule": clean(doc), "alarms": [clean(a) for a in alarms],
             "shed_count": len(doc["sheds"]), "farms": doc["farms"]}
 
 
-@api_router.get("/schedule/latest")
-async def latest_schedule():
-    sched = await db.schedules.find_one({"active": True})
+async def _latest_for(owner: Optional[str]):
+    if not owner:
+        return {"schedule": None, "alarms": []}
+    sched = await db.schedules.find_one({"owner": owner, "active": True})
     if not sched:
         return {"schedule": None, "alarms": []}
     clean(sched)
@@ -664,15 +668,21 @@ async def latest_schedule():
     return {"schedule": sched, "alarms": alarms}
 
 
+@api_router.get("/schedule/latest")
+async def latest_schedule(device_id: Optional[str] = None, owner: Optional[str] = Depends(optional_owner)):
+    resolved = await resolve_owner(owner, device_id)
+    return await _latest_for(resolved)
+
+
 @api_router.get("/schedules")
-async def list_schedules():
-    docs = await db.schedules.find().sort("created_at", -1).to_list(100)
+async def list_schedules(owner: str = Depends(current_owner)):
+    docs = await db.schedules.find({"owner": owner}).sort("created_at", -1).to_list(100)
     return [clean(d) for d in docs]
 
 
 @api_router.delete("/schedule/{schedule_id}")
-async def delete_schedule(schedule_id: str):
-    await db.schedules.update_one({"id": schedule_id}, {"$set": {"active": False}})
+async def delete_schedule(schedule_id: str, owner: str = Depends(current_owner)):
+    await db.schedules.update_one({"id": schedule_id, "owner": owner}, {"$set": {"active": False}})
     return {"ok": True}
 
 
@@ -681,15 +691,15 @@ class DelayUpdate(BaseModel):
 
 
 @api_router.put("/schedule/delay")
-async def set_delay(update: DelayUpdate):
-    sched = await db.schedules.find_one({"active": True})
+async def set_delay(update: DelayUpdate, owner: str = Depends(current_owner)):
+    sched = await db.schedules.find_one({"owner": owner, "active": True})
     if not sched:
         raise HTTPException(404, "No active schedule to delay.")
     delay = max(0, update.delay_min)
     await db.schedules.update_one({"id": sched["id"]}, {"$set": {"delay_min": delay}})
-    settings = await get_settings_doc()
-    await rebuild_active_alarms(settings)
-    return await latest_schedule()
+    settings = await get_settings_doc(owner)
+    await rebuild_active_alarms(owner, settings)
+    return await _latest_for(owner)
 
 
 
@@ -738,15 +748,16 @@ class AssignRequest(BaseModel):
 
 
 @api_router.get("/recipients")
-async def list_recipients(app_url: Optional[str] = None):
-    docs = await db.recipients.find({"active": True}).sort("created_at", 1).to_list(100)
+async def list_recipients(app_url: Optional[str] = None, owner: str = Depends(current_owner)):
+    docs = await db.recipients.find({"owner": owner, "active": True}).sort("created_at", 1).to_list(100)
     return [recipient_public(clean(r), app_url) for r in docs]
 
 
 @api_router.post("/recipients")
-async def create_recipient(req: RecipientCreate, app_url: Optional[str] = None):
+async def create_recipient(req: RecipientCreate, app_url: Optional[str] = None, owner: str = Depends(current_owner)):
     r = {
         "id": str(uuid.uuid4()),
+        "owner": owner,
         "name": (req.name or "").strip() or "Manager",
         "code": new_code(),
         "device_id": None,
@@ -761,15 +772,15 @@ async def create_recipient(req: RecipientCreate, app_url: Optional[str] = None):
 
 
 @api_router.delete("/recipients/{rid}")
-async def delete_recipient(rid: str):
-    await db.recipients.update_one({"id": rid}, {"$set": {"active": False}})
-    await db.schedules.update_many({"assigned_to": rid}, {"$set": {"assigned_to": None, "assigned_name": None}})
+async def delete_recipient(rid: str, owner: str = Depends(current_owner)):
+    await db.recipients.update_one({"id": rid, "owner": owner}, {"$set": {"active": False}})
+    await db.schedules.update_many({"owner": owner, "assigned_to": rid}, {"$set": {"assigned_to": None, "assigned_name": None}})
     return {"ok": True}
 
 
 @api_router.post("/recipients/{rid}/regenerate")
-async def regen_recipient(rid: str, app_url: Optional[str] = None):
-    r = await db.recipients.find_one({"id": rid})
+async def regen_recipient(rid: str, app_url: Optional[str] = None, owner: str = Depends(current_owner)):
+    r = await db.recipients.find_one({"id": rid, "owner": owner})
     if not r:
         raise HTTPException(404, "Manager not found")
     await db.recipients.update_one({"id": rid}, {"$set": {
@@ -802,7 +813,7 @@ async def whoami(device_id: Optional[str] = None):
     r = await db.recipients.find_one({"device_id": device_id, "active": True, "paired": True})
     if not r:
         return {"paired": False}
-    sched = await db.schedules.find_one({"active": True})
+    sched = await db.schedules.find_one({"owner": r.get("owner"), "active": True})
     assigned = bool(sched and sched.get("assigned_to") == r["id"])
     return {
         "paired": True,
@@ -814,20 +825,20 @@ async def whoami(device_id: Optional[str] = None):
 
 
 @api_router.put("/schedule/assign")
-async def assign_schedule(req: AssignRequest):
-    sched = await db.schedules.find_one({"active": True})
+async def assign_schedule(req: AssignRequest, owner: str = Depends(current_owner)):
+    sched = await db.schedules.find_one({"owner": owner, "active": True})
     if not sched:
         raise HTTPException(404, "No active schedule to assign.")
     name = None
     if req.recipient_id:
-        r = await db.recipients.find_one({"id": req.recipient_id, "active": True})
+        r = await db.recipients.find_one({"id": req.recipient_id, "owner": owner, "active": True})
         if not r:
             raise HTTPException(404, "Manager not found")
         name = r["name"]
     await db.schedules.update_one({"id": sched["id"]}, {"$set": {
         "assigned_to": req.recipient_id, "assigned_name": name,
     }})
-    return await latest_schedule()
+    return await _latest_for(owner)
 
 
 
@@ -839,6 +850,7 @@ async def assign_schedule(req: AssignRequest):
 async def log_event(alarm: dict, event: str):
     await db.alarm_log.insert_one({
         "id": str(uuid.uuid4()),
+        "owner": alarm.get("owner", ""),
         "alarm_id": alarm["id"],
         "farm": alarm.get("farm", ""),
         "shed": alarm["shed"],
@@ -850,31 +862,34 @@ async def log_event(alarm: dict, event: str):
 
 
 @api_router.get("/alarms")
-async def list_alarms(schedule_id: Optional[str] = None):
+async def list_alarms(schedule_id: Optional[str] = None, owner: str = Depends(current_owner)):
     if not schedule_id:
-        sched = await db.schedules.find_one({"active": True})
+        sched = await db.schedules.find_one({"owner": owner, "active": True})
         if not sched:
             return []
         schedule_id = sched["id"]
-    alarms = await db.alarms.find({"schedule_id": schedule_id}).to_list(1000)
+    alarms = await db.alarms.find({"schedule_id": schedule_id, "owner": owner}).to_list(1000)
     alarms = [clean(a) for a in alarms]
     alarms.sort(key=lambda a: a["fire_at_utc"])
     return alarms
 
 
 @api_router.get("/alarms/active")
-async def active_alarms(device_id: Optional[str] = None):
-    settings = await get_settings_doc()
+async def active_alarms(device_id: Optional[str] = None, owner: Optional[str] = Depends(optional_owner)):
+    resolved = await resolve_owner(owner, device_id)
+    if not resolved:
+        return {"alarms": [], "realert_interval_min": 10, "realert_max": 3}
+    settings = await get_settings_doc(resolved)
     now = now_utc()
-    sched = await db.schedules.find_one({"active": True})
+    sched = await db.schedules.find_one({"owner": resolved, "active": True})
     base = {"alarms": [], "realert_interval_min": settings["realert_interval_min"],
             "realert_max": settings["realert_max"]}
     if not sched:
         return base
     # A phone paired to a manager only rings when the active schedule is
-    # assigned to that manager. Unpaired devices (the desktop) always see due
+    # assigned to that manager. The grower's desktop (token) always sees due
     # alarms as a fail-safe.
-    if device_id:
+    if device_id and not owner:
         r = await db.recipients.find_one({"device_id": device_id, "active": True, "paired": True})
         if r and sched.get("assigned_to") != r["id"]:
             return base
@@ -913,8 +928,8 @@ async def escalate_alarm(alarm_id: str):
 
 
 @api_router.get("/alarms/log")
-async def alarm_log(limit: int = 100):
-    docs = await db.alarm_log.find().sort("at", -1).to_list(limit)
+async def alarm_log(limit: int = 100, owner: str = Depends(current_owner)):
+    docs = await db.alarm_log.find({"owner": owner}).sort("at", -1).to_list(limit)
     return [clean(d) for d in docs]
 
 
@@ -1024,56 +1039,57 @@ async def _push_to_device(device_id: str, payload: dict):
 
 
 async def deliver_due_alarms():
-    """Runs on a timer. Delivers browser push for due, unacknowledged alarms to
-    the phone of the manager who is on catch, then re-alerts on the escalation
-    interval until acknowledged or the max is reached."""
+    """Runs on a timer. For every grower's active schedule, delivers browser push
+    for due, unacknowledged alarms to the phone of the manager on catch, then
+    re-alerts on the escalation interval until acknowledged or the max is reached."""
     try:
-        sched = await db.schedules.find_one({"active": True})
-        if not sched or not sched.get("assigned_to"):
-            return
-        recipient = await db.recipients.find_one(
-            {"id": sched["assigned_to"], "active": True, "paired": True}
-        )
-        if not recipient or not recipient.get("device_id"):
-            return
-        device_id = recipient["device_id"]
-        if not await db.push_subscriptions.count_documents(
-            {"device_id": device_id, "disabled": {"$ne": True}}
-        ):
-            return
-
-        settings = await get_settings_doc()
-        interval = timedelta(minutes=max(1, settings["realert_interval_min"]))
-        max_alerts = max(1, settings["realert_max"])
-        now = now_utc()
-
-        docs = await db.alarms.find(
-            {"schedule_id": sched["id"], "status": "pending"}
-        ).to_list(1000)
-        for a in docs:
-            if parse_iso(a["fire_at_utc"]) > now:
+        scheds = await db.schedules.find({"active": True}).to_list(1000)
+        for sched in scheds:
+            if not sched.get("assigned_to"):
                 continue
-            count = a.get("push_count", 0)
-            last = a.get("last_pushed_at")
-            send = False
-            if count == 0:
-                send = True
-            elif count < max_alerts and last and (now - parse_iso(last)) >= interval:
-                send = True
-            if not send:
-                continue
-            payload = {
-                "title": a["title"],
-                "body": f"{a.get('farm') or ''} Shed {a['shed']} · {a['fire_at_local'][11:16]}".strip(),
-                "tag": a["id"],
-                "url": "/",
-            }
-            await _push_to_device(device_id, payload)
-            await db.alarms.update_one(
-                {"id": a["id"]},
-                {"$set": {"push_count": count + 1, "last_pushed_at": iso_now()}},
+            recipient = await db.recipients.find_one(
+                {"id": sched["assigned_to"], "active": True, "paired": True}
             )
-            await log_event(a, "fired" if count == 0 else "escalated")
+            if not recipient or not recipient.get("device_id"):
+                continue
+            device_id = recipient["device_id"]
+            if not await db.push_subscriptions.count_documents(
+                {"device_id": device_id, "disabled": {"$ne": True}}
+            ):
+                continue
+
+            settings = await get_settings_doc(sched["owner"])
+            interval = timedelta(minutes=max(1, settings["realert_interval_min"]))
+            max_alerts = max(1, settings["realert_max"])
+            now = now_utc()
+
+            docs = await db.alarms.find(
+                {"schedule_id": sched["id"], "status": "pending"}
+            ).to_list(1000)
+            for a in docs:
+                if parse_iso(a["fire_at_utc"]) > now:
+                    continue
+                count = a.get("push_count", 0)
+                last = a.get("last_pushed_at")
+                send = False
+                if count == 0:
+                    send = True
+                elif count < max_alerts and last and (now - parse_iso(last)) >= interval:
+                    send = True
+                if not send:
+                    continue
+                payload = {
+                    "title": a["title"],
+                    "body": f"{a.get('farm') or ''} Shed {a['shed']} · {a['fire_at_local'][11:16]}".strip(),
+                    "tag": a["id"],
+                    "url": "/",
+                }
+                await _push_to_device(device_id, payload)
+                await db.alarms.update_one(
+                    {"id": a["id"]},
+                    {"$set": {"push_count": count + 1, "last_pushed_at": iso_now()}},
+                )
+                await log_event(a, "fired" if count == 0 else "escalated")
     except Exception as exc:  # noqa: BLE001
         logger.warning("deliver_due_alarms error: %s", exc)
 
@@ -1103,10 +1119,8 @@ async def billing_plan():
 
 
 @api_router.post("/payments/checkout")
-async def create_checkout(body: CheckoutRequest, request: Request):
-    email = _norm_email(body.email)
-    if "@" not in email:
-        raise HTTPException(400, "Enter a valid email address.")
+async def create_checkout(body: CheckoutRequest, request: Request, owner: str = Depends(current_owner)):
+    email = owner  # tenant email from the signed-in account; never trust the client
     product = PRICE_MAP.get(body.product)
     if not product:
         raise HTTPException(400, "Unknown product.")
@@ -1188,14 +1202,56 @@ async def checkout_status(session_id: str):
 
 
 @api_router.get("/season-pass/status")
-async def season_pass_status(email: Optional[str] = None):
-    if not email:
-        return {"active": False, "valid_until": None}
-    doc = await db.season_passes.find_one({"email": _norm_email(email)})
+async def season_pass_status(owner: str = Depends(current_owner)):
+    doc = await db.season_passes.find_one({"email": owner})
     if not doc:
         return {"active": False, "valid_until": None}
     active = parse_iso(doc["valid_until"]) > now_utc()
     return {"active": active, "valid_until": doc["valid_until"]}
+
+
+# ---------------------------------------------------------------------------
+# Routes: auth (email + password accounts; account email is the tenant key)
+# ---------------------------------------------------------------------------
+
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+@api_router.post("/auth/register")
+async def register(body: RegisterIn):
+    email = _norm_email(body.email)
+    if len(body.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters.")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "That email is already registered — try signing in.")
+    await db.users.insert_one({
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "password_hash": hash_password(body.password),
+        "created_at": iso_now(),
+    })
+    return {"access_token": make_token(email), "email": email}
+
+
+@api_router.post("/auth/login")
+async def login(body: LoginIn):
+    email = _norm_email(body.email)
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(body.password, user.get("password_hash", "")):
+        raise HTTPException(401, "Incorrect email or password.")
+    return {"access_token": make_token(email), "email": email}
+
+
+@api_router.get("/auth/me")
+async def auth_me(owner: str = Depends(current_owner)):
+    return {"email": owner}
 
 
 # ---------------------------------------------------------------------------
@@ -1219,6 +1275,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def start_scheduler():
+    try:
+        await db.users.create_index("email", unique=True)
+    except Exception:  # noqa: BLE001
+        pass
     scheduler.add_job(deliver_due_alarms, "interval", seconds=15, id="deliver", replace_existing=True)
     scheduler.start()
 

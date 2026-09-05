@@ -1,0 +1,44 @@
+{
+  "summary": "Backend-only. Validated the NEW multi-tenant auth refactor end-to-end via /app/backend/tests/test_auth_multitenant.py — 34/34 pass in 16.7s against the public URL. Coverage: (1) AUTH — /auth/register returns access_token & lowercases email; duplicate -> 409; password<6 -> 400; /auth/login success + wrong-password 401 with identical detail as unknown-email 401 (no user-existence disclosure); /auth/me with valid Bearer returns {email}; missing/garbage/wrong-scheme token -> 401. (2) PROTECTED ROUTES — parametrized 15 endpoints (GET/PUT /settings, POST /upload, POST /schedule/manual, GET /schedules, DELETE /schedule/{id}, PUT /schedule/delay, PUT /schedule/assign, GET/POST/DELETE /recipients*, GET /alarms, GET /alarms/log, GET /season-pass/status, POST /payments/checkout) — ALL 401 without Bearer. (3) MULTI-TENANT ISOLATION — registered growers A and B; A wrote custom settings (augers_offset=240, tz=Australia/Brisbane), a manual schedule with a UUID-tagged shed, and a recipient. Verified B.settings = defaults (not A's 240); B.schedules = []; B.schedule/latest never returns A's schedule id / uniq_shed; B.recipients does not contain A's manager; B.alarms = []; B.alarms/log has no rows for A's shed. Cross-tenant DELETE attempts (B deleting A's schedule id and recipient id) confirmed silently no-op — A's data survives (owner filter in Mongo update_one is doing its job). A still sees all A's data. (4) MANAGER/DEVICE FLOW — unpaired device: whoami=paired:false, /schedule/latest?device_id -> schedule:None (no leakage even though A has one). After /pairing/claim with A's recipient code: whoami paired:true; /schedule/latest?device_id (NO token) returns A's active schedule; /alarms/active?device_id -> [] until A does PUT /schedule/assign {recipient_id}, then due alarms appear; clearing assignment returns []; unknown/never-paired device_id -> schedule:None and alarms:[] (no leakage). Wrong pairing code -> 400. (5) BILLING PER TENANT — GET /billing/plan = {product:season_pass, amount:29.0, currency:aud, term_days:365}. POST /payments/checkout with tampered body {email:'attacker@evil.com', amount:0.01, currency:'usd'} still returns a real cs_test_ session, and /payments/status/{id} shows email = TOKEN owner (attacker email ignored — Pydantic drops unknown fields, server reads email from JWT and amount from PRICE_MAP). New account /season-pass/status = {active:false}; seeded demo@feedwithdrawal.app login works and returns {active:true}; seeded doublebb@baqerifarming.com.au login works and returns {active:true}. (6) REGRESSION — /upload csv with Bearer parses per-owner (2 sheds persisted, visible via /schedule/latest); /schedule/delay is non-compounding (second +120 == first +120, reset to 0 restores base_auger); /push endpoints remain unauth device-level (subscribe/status/test/unsubscribe soft-disable). No _id leakage anywhere.\n\nLegacy test debt (NOT a backend bug): 36 pre-existing tests in backend_test.py / test_recipients.py / test_new_features.py / test_push.py / test_billing.py were written against the OLD unauthenticated API and now correctly return 401 for every protected call — they need to be updated to send Bearer tokens. This is expected fallout of the multi-tenant refactor and does not indicate a backend regression.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /schedules", "issue": "Response includes internal fields 'delay_min' and 'delay_min_effective' consistent across owners — no cross-tenant leakage but consider whether _id-style Mongo fields are stripped. Verified clean() strips _id."},
+      {"endpoint": "DELETE /schedule/{id} and DELETE /recipients/{id}", "issue": "Return 200 {ok:true} for both owned and unowned ids (silent no-op via owner-filtered update_many/update_one). Behaviour is safe (data not deleted) but arguably should 404 when caller does not own the id to make client debugging clearer. Current behaviour is not a security issue."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_multitenant.py",
+    "/app/test_reports/pytest/auth_multitenant_results.xml"
+  ],
+  "action_items": [
+    "Update the 5 legacy test files (backend_test.py, test_recipients.py, test_new_features.py, test_push.py, test_billing.py) to obtain and inject a Bearer token via /api/auth/register in a session-scoped fixture. Right now they all 401 against the multi-tenant API. Not a backend bug — pure test-migration work.",
+    "OPTIONAL: consider returning 404 (instead of 200 no-op) when DELETE /schedule/{id} or /recipients/{id} targets an id owned by another tenant. Current behaviour keeps A's data safe but hides mistakes from B's client.",
+    "OPTIONAL: /auth/login currently returns detail='Incorrect email or password.' for both wrong-password and unknown-email — good (no user enumeration). Keep it that way."
+  ],
+  "critical_code_review_comments": [
+    "server.py:79-87 current_owner() requires the JWT sub to correspond to an existing users row — good defence-in-depth if a user account is deleted the token is invalidated immediately.",
+    "server.py:94-102 resolve_owner() correctly prefers the token email over the device_id and only falls back to a paired+active recipient. Unpaired device_id returns None which -> empty response. No leakage path found.",
+    "server.py:774-778 delete_recipient() filters {id, owner} so B cannot delete A's recipient — confirmed by test_a_creates_data_b_cannot_see.",
+    "server.py:1122-1155 create_checkout() reads email from `owner` (JWT) and amount+currency from PRICE_MAP — tamper-proof against client-supplied {email, amount, currency}.",
+    "server.py:1276-1283 startup creates unique index on users.email — race-safe registration.",
+    "server.py:816 whoami() re-fetches sched by recipient.owner (not by token) — correct for the no-auth manager path. assigned=bool(sched.assigned_to == r.id) is exact-match, no ambiguity.",
+    "Potential minor: /alarms/active gating (line 892-895) only enforces manager-assignment when device_id is present AND owner is None. If a grower somehow sends BOTH their own token and a paired device_id, they see all due alarms (fail-safe). Behaviour is intentional per comment 'grower desktop always sees due alarms as a fail-safe'. Fine.",
+    "clean() strips _id everywhere I sampled — no ObjectId leakage in JSON responses."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_multitenant.py (new — 34 tests, 6 classes)"
+  ],
+  "success_rate": {"backend": "100% (34/34 new multi-tenant tests). Legacy suite is 45/81 because 36 pre-multi-tenant tests need Bearer tokens added — that's test debt, not a backend regression.", "frontend": "not tested (backend only per request)"},
+  "seed_data_creation": "Each test registers ephemeral accounts of the form TEST_grower_<uuid>@example.com and cleans up its own recipients. No account-deletion endpoint exists so account rows accumulate — they are harmless. Existing seeded accounts (demo@feedwithdrawal.app, doublebb@baqerifarming.com.au) were only read, never mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run new suite in isolation: `pytest -o addopts='' backend/tests/test_auth_multitenant.py -v` (34 pass, ~17s, sequential). Full suite `pytest backend/tests/` will show 36 failures — those are legacy tests that need Bearer-token migration; behaviour under the JWT is correct. Public base URL is EXPO_PUBLIC_BACKEND_URL. Seeded accounts with active season pass: demo@feedwithdrawal.app / demo123456 and doublebb@baqerifarming.com.au / DoubleB2026. Stripe checkout may return 502 in some envs (proxy flakiness); test_checkout_uses_token_email_not_body pytest.skip's gracefully in that case.",
+  "rca_of_issue": "N/A — no backend bugs found. Auth, isolation, device flow, and billing all behave per spec. The pre-existing 36 legacy test failures are pure test-migration debt (missing Authorization headers)."
+}

@@ -29,15 +29,16 @@ export default function HomeScreen() {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading } = useQuery<Latest>({
-    queryKey: qk.schedule,
-    queryFn: () => api.get("/schedule/latest"),
-    refetchInterval: 15000,
-  });
   const [deviceId, setDeviceId] = useState("");
   useEffect(() => {
     getDeviceId().then(setDeviceId);
   }, []);
+  const { data, isLoading } = useQuery<Latest>({
+    queryKey: [...qk.schedule, deviceId],
+    queryFn: () => api.get(`/schedule/latest${deviceId ? `?device_id=${deviceId}` : ""}`),
+    enabled: !!deviceId,
+    refetchInterval: 15000,
+  });
   const { data: whoami } = useQuery<Whoami>({
     queryKey: [...qk.whoami, deviceId],
     queryFn: () => api.get(`/pairing/whoami${deviceId ? `?device_id=${deviceId}` : ""}`),

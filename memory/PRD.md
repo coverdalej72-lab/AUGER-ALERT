@@ -92,3 +92,10 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
       LIMITATION (honest): loud siren only plays with the tab open / screen on. Locked/closed
       phone falls back to the push notification's system sound + vibration (browsers can't play a
       custom continuous siren on a locked phone).
+
+## Multi-tenant accounts (email+password) — DONE
+- Real JWT auth (register/login/me). Every grower gets a PRIVATE workspace; all data scoped by owner=email.
+- Managers unchanged: pair by device, resolve to their grower via recipient.owner.
+- Dashboard: Sign in -> (season pass check) -> Control Centre. 34/34 backend multi-tenant tests pass.
+- Accounts: doublebb@baqerifarming.com.au/DoubleB2026, demo@feedwithdrawal.app/demo123456.
+- Backlog: migrate 5 legacy test files to send Bearer tokens (harmless test debt).

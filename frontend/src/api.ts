@@ -1,7 +1,37 @@
 // Thin API client for the Farm Feed Withdrawal Timer backend.
+import { storage } from "@/src/utils/storage";
+
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export const API = `${BASE}/api`;
+
+const TOKEN_KEY = "auth_token";
+let authToken: string | null = null;
+
+export async function initAuth(): Promise<string | null> {
+  authToken = (await storage.getItem<string>(TOKEN_KEY, "")) || null;
+  return authToken;
+}
+
+export function getToken(): string | null {
+  return authToken;
+}
+
+export async function setToken(token: string): Promise<void> {
+  authToken = token;
+  await storage.setItem(TOKEN_KEY, token);
+}
+
+export async function clearToken(): Promise<void> {
+  authToken = null;
+  await storage.setItem(TOKEN_KEY, "");
+}
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const h: Record<string, string> = { ...(extra || {}) };
+  if (authToken) h.Authorization = `Bearer ${authToken}`;
+  return h;
+}
 
 async function handle(res: Response) {
   if (!res.ok) {
@@ -18,21 +48,39 @@ async function handle(res: Response) {
 }
 
 export const api = {
-  get: (path: string) => fetch(`${API}${path}`).then(handle),
+  get: (path: string) => fetch(`${API}${path}`, { headers: authHeaders() }).then(handle),
   post: (path: string, body?: unknown) =>
     fetch(`${API}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(handle),
   put: (path: string, body?: unknown) =>
     fetch(`${API}${path}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(handle),
-  del: (path: string) => fetch(`${API}${path}`, { method: "DELETE" }).then(handle),
+  del: (path: string) => fetch(`${API}${path}`, { method: "DELETE", headers: authHeaders() }).then(handle),
 };
+
+// ---- Auth ------------------------------------------------------------------
+
+export type AuthResult = { access_token: string; email: string };
+
+export async function registerAccount(email: string, password: string): Promise<AuthResult> {
+  const r: AuthResult = await api.post("/auth/register", { email, password });
+  await setToken(r.access_token);
+  return r;
+}
+
+export async function loginAccount(email: string, password: string): Promise<AuthResult> {
+  const r: AuthResult = await api.post("/auth/login", { email, password });
+  await setToken(r.access_token);
+  return r;
+}
+
+export const fetchMe = (): Promise<{ email: string }> => api.get("/auth/me");
 
 // ---- Domain types ----------------------------------------------------------
 
@@ -166,16 +214,15 @@ export const fetchRecipients = (): Promise<Recipient[]> =>
 
 // ---- Billing (Stripe season pass) -----------------------------------------
 
-export const fetchPassStatus = (email: string): Promise<PassStatus> =>
-  api.get(`/season-pass/status?email=${encodeURIComponent(email)}`);
+export const fetchPassStatus = (): Promise<PassStatus> => api.get(`/season-pass/status`);
 
 export const fetchPlan = (): Promise<BillingPlan> => api.get(`/billing/plan`);
 
 export const fetchShareQr = (url: string): Promise<{ url: string; qr_data_url: string }> =>
   api.get(`/share/qr?url=${encodeURIComponent(url)}`);
 
-export const startCheckout = (email: string): Promise<{ url: string; session_id: string }> =>
-  api.post(`/payments/checkout`, { email, product: "season_pass", origin: appOrigin() });
+export const startCheckout = (): Promise<{ url: string; session_id: string }> =>
+  api.post(`/payments/checkout`, { product: "season_pass", origin: appOrigin() });
 
 export const fetchPaymentStatus = (
   sessionId: string,
