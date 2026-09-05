@@ -484,6 +484,12 @@ async def root():
     return {"message": "Farm Feed Withdrawal Timer API"}
 
 
+@api_router.get("/health")
+async def api_health():
+    """Liveness probe reachable through the public /api proxy — no DB access."""
+    return {"status": "ok"}
+
+
 @api_router.get("/settings", response_model=Settings)
 async def read_settings():
     s = await get_settings_doc()
@@ -868,6 +874,7 @@ async def push_subscribe(req: PushSubscribe):
             "device_id": req.device_id,
             "endpoint": endpoint,
             "subscription": req.subscription,
+            "disabled": False,
             "updated_at": iso_now(),
         }},
         upsert=True,
@@ -877,7 +884,11 @@ async def push_subscribe(req: PushSubscribe):
 
 @api_router.delete("/push/subscribe/{device_id}")
 async def push_unsubscribe(device_id: str):
-    await db.push_subscriptions.delete_many({"device_id": device_id})
+    # User-initiated opt-out: soft-disable rather than destroy history.
+    await db.push_subscriptions.update_many(
+        {"device_id": device_id},
+        {"$set": {"disabled": True, "disabled_at": iso_now()}},
+    )
     return {"ok": True}
 
 
@@ -885,7 +896,9 @@ async def push_unsubscribe(device_id: str):
 async def push_status(device_id: Optional[str] = None):
     if not device_id:
         return {"subscribed": False}
-    n = await db.push_subscriptions.count_documents({"device_id": device_id})
+    n = await db.push_subscriptions.count_documents(
+        {"device_id": device_id, "disabled": {"$ne": True}}
+    )
     return {"subscribed": n > 0}
 
 
@@ -895,7 +908,9 @@ class PushTest(BaseModel):
 
 @api_router.post("/push/test")
 async def push_test(req: PushTest):
-    if not await db.push_subscriptions.count_documents({"device_id": req.device_id}):
+    if not await db.push_subscriptions.count_documents(
+        {"device_id": req.device_id, "disabled": {"$ne": True}}
+    ):
         raise HTTPException(400, "No push subscription for this device yet.")
     await _push_to_device(req.device_id, {
         "title": "Test alarm ✓",
@@ -918,14 +933,21 @@ def _send_web_push(subscription: dict, payload: dict):
 
 
 async def _push_to_device(device_id: str, payload: dict):
-    subs = await db.push_subscriptions.find({"device_id": device_id}).to_list(20)
+    subs = await db.push_subscriptions.find(
+        {"device_id": device_id, "disabled": {"$ne": True}}
+    ).to_list(20)
     for sub in subs:
         try:
             await asyncio.to_thread(_send_web_push, sub["subscription"], payload)
         except WebPushException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (404, 410):
-                await db.push_subscriptions.delete_one({"_id": sub["_id"]})
+                # Endpoint is gone — soft-disable (non-destructive). Re-subscribing
+                # from the browser re-enables it. Never hard-delete in a background job.
+                await db.push_subscriptions.update_one(
+                    {"_id": sub["_id"]},
+                    {"$set": {"disabled": True, "disabled_at": iso_now()}},
+                )
             else:
                 logger.warning("web push failed: %s", exc)
         except Exception as exc:  # noqa: BLE001
@@ -946,7 +968,9 @@ async def deliver_due_alarms():
         if not recipient or not recipient.get("device_id"):
             return
         device_id = recipient["device_id"]
-        if not await db.push_subscriptions.count_documents({"device_id": device_id}):
+        if not await db.push_subscriptions.count_documents(
+            {"device_id": device_id, "disabled": {"$ne": True}}
+        ):
             return
 
         settings = await get_settings_doc()
@@ -1108,6 +1132,12 @@ async def season_pass_status(email: Optional[str] = None):
 # ---------------------------------------------------------------------------
 
 app.include_router(api_router)
+
+
+@app.get("/health")
+async def health():
+    """Lightweight liveness probe — no DB access."""
+    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,

@@ -139,7 +139,7 @@ export function Paywall({
           />
         </View>
 
-        <Text style={styles.secure}>Secure payment by Stripe · test mode</Text>
+        <Text style={styles.secure}>Secure payment · powered by Stripe</Text>
       </View>
     </View>
   );
