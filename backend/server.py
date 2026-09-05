@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Body, Request
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Body, Request, Header, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,7 +8,7 @@ import base64
 import logging
 import secrets
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import uuid
 from datetime import datetime, date, time, timedelta, timezone
@@ -16,6 +16,8 @@ from datetime import datetime, date, time, timedelta, timezone
 import json
 import asyncio
 
+import jwt
+from passlib.context import CryptContext
 import pandas as pd
 import qrcode
 from pywebpush import webpush, WebPushException
@@ -37,6 +39,67 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:alerts@feedwithdrawal.app")
 
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-insecure-change-me")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_DAYS = int(os.environ.get("ACCESS_TOKEN_DAYS", "30"))
+
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def hash_password(p: str) -> str:
+    return pwd_ctx.hash(p[:72])
+
+
+def verify_password(p: str, hashed: str) -> bool:
+    try:
+        return pwd_ctx.verify(p[:72], hashed)
+    except Exception:
+        return False
+
+
+def make_token(email: str) -> str:
+    now = now_utc()
+    claims = {"sub": email, "iat": now, "exp": now + timedelta(days=ACCESS_TOKEN_DAYS)}
+    return jwt.encode(claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _email_from_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        sub = payload.get("sub")
+        return sub.lower().strip() if sub else None
+    except Exception:
+        return None
+
+
+async def current_owner(authorization: Optional[str] = Header(None)) -> str:
+    """Required auth — the grower's account email is the tenant key."""
+    email = _email_from_token(authorization)
+    if not email:
+        raise HTTPException(status_code=401, detail="Please sign in.")
+    user = await db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Account not found.")
+    return email
+
+
+async def optional_owner(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    return _email_from_token(authorization)
+
+
+async def resolve_owner(owner: Optional[str], device_id: Optional[str]) -> Optional[str]:
+    """Grower (token) -> their email; else a paired manager device -> its owner."""
+    if owner:
+        return owner
+    if device_id:
+        r = await db.recipients.find_one({"device_id": device_id, "active": True, "paired": True})
+        if r:
+            return r.get("owner")
+    return None
 
 # Season pass catalog — amounts are fixed server-side (never trust the client).
 SEASON_PASS_DAYS = 365
