@@ -1,9 +1,15 @@
 import { Redirect } from "expo-router";
-import { Platform } from "react-native";
+import { Platform, useWindowDimensions } from "react-native";
 
-// Entry: the web link shows the landing page (to show people); native devices
-// go straight into the phone companion.
+// Entry:
+//  - Computer (wide browser) -> the control-centre PROGRAM (/dashboard).
+//  - Phone browser -> the companion app (/(tabs)/home).
+//  - Native devices -> the companion app.
+// The shareable landing page is still available at /landing.
 export default function Index() {
-  if (Platform.OS === "web") return <Redirect href="/landing" />;
+  const { width } = useWindowDimensions();
+  if (Platform.OS === "web") {
+    return <Redirect href={width >= 900 ? "/dashboard" : "/(tabs)/home"} />;
+  }
   return <Redirect href="/(tabs)/home" />;
 }
