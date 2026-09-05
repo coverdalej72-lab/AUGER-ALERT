@@ -11,6 +11,7 @@ import { Paywall } from "@/src/components/Paywall";
 import { ShareApp } from "@/src/components/ShareApp";
 import { Icon } from "@/src/components/Icon";
 import { getBillingEmail, setBillingEmail } from "@/src/utils/billing";
+import { testAlarmSound } from "@/src/utils/sound";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 type Latest = { schedule: Schedule | null; alarms: Alarm[] };
@@ -244,11 +245,17 @@ function DashboardInner() {
             </Text>
           </View>
         </View>
-        <Pill
-          label={schedule?.assigned_name ? `On catch: ${schedule.assigned_name}` : "No-one assigned"}
-          tone={schedule?.assigned_name ? "success" : "warning"}
-          icon={schedule?.assigned_name ? "account-check" : "account-alert"}
-        />
+        <View style={styles.headerRight}>
+          <Pressable onPress={() => testAlarmSound()} style={styles.testAlarmBtn} testID="test-alarm-button">
+            <Icon name="bell-ring" size={16} color={colors.brandPrimary} />
+            <Text style={styles.testAlarmText}>Test alarm</Text>
+          </Pressable>
+          <Pill
+            label={schedule?.assigned_name ? `On catch: ${schedule.assigned_name}` : "No-one assigned"}
+            tone={schedule?.assigned_name ? "success" : "warning"}
+            icon={schedule?.assigned_name ? "account-check" : "account-alert"}
+          />
+        </View>
       </View>
 
       <View style={styles.grid}>
@@ -580,6 +587,18 @@ const useStyles = makeStyles((colors) => ({
   root: { flex: 1, backgroundColor: colors.surface },
   content: { padding: spacing.xl, maxWidth: 1240, width: "100%", alignSelf: "center", gap: spacing.xl },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.md },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  testAlarmBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+  },
+  testAlarmText: { fontFamily: fonts.textSemiBold, color: colors.brandPrimary, fontSize: 13 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   logo: {
     width: 48, height: 48, borderRadius: radius.md, backgroundColor: colors.brandTertiary,

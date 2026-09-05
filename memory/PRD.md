@@ -83,3 +83,12 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
       expo-notifications config plugin added, /health + /api/health endpoints added.
 - [x] Dashboard "Share & QR" panel: shows the live web link + scannable QR (GET /api/share/qr)
       + Copy button. Uses window origin so it auto-updates to the permanent URL after deploy.
+- [x] Free owner account seeded for doublebb@baqerifarming.com.au (product owner_free, ~50yr).
+- [x] Web entry routes by device: computer -> /dashboard (the program); phone -> companion.
+- [x] LOUD alarm fix: sound.ts now plays a continuous two-tone siren (gain 0.9) that runs until
+      DONE is tapped (was a single ~1s beep every 10 min). Audio engine resumes on first user
+      gesture (_layout listeners) so browsers don't block it. Added a "Test alarm" button on the
+      dashboard header. Verified overlay fires on due alarms.
+      LIMITATION (honest): loud siren only plays with the tab open / screen on. Locked/closed
+      phone falls back to the push notification's system sound + vibration (browsers can't play a
+      custom continuous siren on a locked phone).

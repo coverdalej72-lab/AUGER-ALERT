@@ -14,7 +14,7 @@ import * as Haptics from "expo-haptics";
 
 import { api, qk, type Alarm } from "@/src/api";
 import { KIND } from "@/src/format";
-import { alarmBeep } from "@/src/utils/sound";
+import { startAlarm, stopAlarm } from "@/src/utils/sound";
 import { getDeviceId } from "@/src/utils/device";
 import { Icon } from "@/src/components/Icon";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
@@ -96,27 +96,37 @@ export function AlarmOverlay() {
     opacity: 0.55 - pulse.value * 0.4,
   }));
 
-  // Alert + re-alert (escalation) loop while an alarm is showing
+  // Loud continuous siren while an alarm is showing; re-alert (escalation
+  // count) ticks on the configured interval. Sound stops the moment the alarm
+  // is cleared (DONE tapped) or the overlay unmounts.
   const activeId = active?.id;
   const escalateRef = useRef(escalate);
   escalateRef.current = escalate;
   useEffect(() => {
-    if (!activeId) return;
-    // initial alert
+    if (!activeId) {
+      stopAlarm();
+      return;
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-    alarmBeep();
+    startAlarm();
     fireLocalNotification(active!);
+
+    const heavy = setInterval(() => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    }, 4000);
 
     const interval = setInterval(
       () => {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-        alarmBeep();
         fireLocalNotification(active!);
         escalateRef.current.mutate(activeId);
       },
       Math.max(1, realertMin) * 60 * 1000,
     );
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(heavy);
+      clearInterval(interval);
+      stopAlarm();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, realertMin]);
 

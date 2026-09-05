@@ -49,7 +49,19 @@ export default function RootLayout() {
         m.injectPwaMeta();
         m.registerSW();
       });
-      return;
+      // Browsers block audio until the user interacts — resume the alarm engine
+      // on the first gesture so alarms can sound loudly later.
+      const unlock = () => {
+        import("@/src/utils/sound").then((m) => m.unlockAudio());
+      };
+      window.addEventListener("pointerdown", unlock);
+      window.addEventListener("keydown", unlock);
+      window.addEventListener("touchstart", unlock);
+      return () => {
+        window.removeEventListener("pointerdown", unlock);
+        window.removeEventListener("keydown", unlock);
+        window.removeEventListener("touchstart", unlock);
+      };
     }
     import("expo-notifications")
       .then((N) => N.requestPermissionsAsync())
