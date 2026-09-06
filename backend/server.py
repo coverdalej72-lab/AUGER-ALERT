@@ -1319,6 +1319,95 @@ async def auth_me(owner: str = Depends(current_owner)):
     return {"email": owner}
 
 
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+    origin: Optional[str] = None
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str
+    new_password: str
+
+
+RESET_TOKEN_MINUTES = 30
+_RESET_GENERIC = "If an account exists for that email, we've sent a reset link."
+
+
+def _token_digest(raw: str) -> str:
+    from hashlib import sha256
+    return sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _reset_email_html(reset_url: str) -> str:
+    from html import escape
+    return (
+        '<table role="presentation" width="100%" style="max-width:520px;margin:0 auto">'
+        '<tr><td style="padding:24px;font-family:Arial,Helvetica,sans-serif;color:#111">'
+        '<h2 style="margin:0 0 12px">Reset your password</h2>'
+        '<p style="margin:0 0 16px">Someone asked to reset the password for your '
+        'Feed Withdrawal Timer account. Tap the button to choose a new one.</p>'
+        f'<p style="margin:0 0 16px"><a href="{escape(reset_url)}" '
+        'style="display:inline-block;background:#F0510F;color:#fff;text-decoration:none;'
+        'padding:12px 20px;border-radius:8px;font-weight:bold">Choose a new password</a></p>'
+        f'<p style="margin:0 0 8px;font-size:13px;color:#555">This link expires in '
+        f'{RESET_TOKEN_MINUTES} minutes and works once.</p>'
+        '<p style="margin:0;font-size:13px;color:#555">If you didn\'t ask for this, you can '
+        'safely ignore this email — your password won\'t change.</p>'
+        '<p style="font-size:12px;color:#888;margin-top:24px">Sent by Feed Withdrawal Timer. '
+        'We never ask for your password or card details by email.</p>'
+        '</td></tr></table>'
+    )
+
+
+@api_router.post("/auth/password-reset/request")
+async def password_reset_request(body: PasswordResetRequestIn, request: Request):
+    email = _norm_email(body.email)
+    user = await db.users.find_one({"email": email})
+    if user:
+        await db.password_reset_tokens.delete_many({"email": email})
+        raw = secrets.token_urlsafe(32)
+        now = now_utc()
+        await db.password_reset_tokens.insert_one({
+            "token_hash": _token_digest(raw),
+            "email": email,
+            "created_at": iso_now(),
+            "expires_at": (now + timedelta(minutes=RESET_TOKEN_MINUTES)).replace(microsecond=0).isoformat(),
+        })
+        origin = (body.origin or "").rstrip("/") or str(request.base_url).rstrip("/")
+        reset_url = f"{origin}/reset?token={raw}"
+        try:
+            await send_email(
+                to=email,
+                subject="Reset your Feed Withdrawal Timer password",
+                html=_reset_email_html(reset_url),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("reset email failed: %s", exc)
+            await db.password_reset_tokens.delete_one({"token_hash": _token_digest(raw)})
+    return {"message": _RESET_GENERIC}
+
+
+@api_router.post("/auth/password-reset/confirm")
+async def password_reset_confirm(body: PasswordResetConfirmIn):
+    if len(body.new_password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters.")
+    doc = await db.password_reset_tokens.find_one_and_delete(
+        {"token_hash": _token_digest(body.token)}
+    )
+    if not doc or parse_iso(doc["expires_at"]) <= now_utc():
+        raise HTTPException(400, "This reset link is invalid or has expired. Please request a new one.")
+    email = doc["email"]
+    result = await db.users.update_one(
+        {"email": email},
+        {"$set": {"password_hash": hash_password(body.new_password),
+                  "password_changed_at": iso_now()}},
+    )
+    if result.matched_count != 1:
+        raise HTTPException(400, "This reset link is invalid or has expired. Please request a new one.")
+    return {"access_token": make_token(email), "email": email}
+
+
+
 # ---------------------------------------------------------------------------
 
 app.include_router(api_router)
@@ -1342,6 +1431,7 @@ app.add_middleware(
 async def start_scheduler():
     try:
         await db.users.create_index("email", unique=True)
+        await db.password_reset_tokens.create_index("token_hash", unique=True)
     except Exception:  # noqa: BLE001
         pass
     scheduler.add_job(deliver_due_alarms, "interval", seconds=15, id="deliver", replace_existing=True)

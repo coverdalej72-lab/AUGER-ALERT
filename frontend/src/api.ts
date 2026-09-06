@@ -82,6 +82,15 @@ export async function loginAccount(email: string, password: string): Promise<Aut
 
 export const fetchMe = (): Promise<{ email: string }> => api.get("/auth/me");
 
+export const requestPasswordReset = (email: string): Promise<{ message: string }> =>
+  api.post("/auth/password-reset/request", { email, origin: appOrigin() });
+
+export async function confirmPasswordReset(token: string, newPassword: string): Promise<AuthResult> {
+  const r: AuthResult = await api.post("/auth/password-reset/confirm", { token, new_password: newPassword });
+  await setToken(r.access_token);
+  return r;
+}
+
 // ---- Domain types ----------------------------------------------------------
 
 export type ShedTiming = {

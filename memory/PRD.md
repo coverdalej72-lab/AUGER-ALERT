@@ -125,3 +125,14 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
 - Go-live: user adds Stripe webhook endpoint https://<deployed>/api/webhook/stripe
   (checkout.session.completed) and sets STRIPE_WEBHOOK_SECRET in deployment secrets. See
   /app/GO_LIVE_CHECKLIST.md.
+
+## Forgot password / reset (session 2026-06) — DONE
+- Backend (server.py): POST /auth/password-reset/request (generic response, no email enumeration;
+  emails a single-use opaque token link via Emergent Resend) + POST /auth/password-reset/confirm
+  (atomic find_one_and_delete single-use, explicit expiry check 30 min, sets new bcrypt hash,
+  returns a fresh access_token so the user is logged straight in). Tokens stored SHA-256-hashed in
+  password_reset_tokens (unique index on token_hash). Min password 6 (matches register).
+- Frontend: AuthScreen has a "Forgot your password?" link -> forgot mode (email only, generic
+  confirmation). New browser route /reset?token=... (app/reset.tsx) sets the new password.
+- Verified: valid token resets+logs in; reuse fails (single-use); old pw 401 / new pw works;
+  garbage token 400; unknown vs known email identical. Screens render (screenshots).
