@@ -111,3 +111,17 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
   account + payout set up. A live webhook (checkout.session.completed) is recommended for robust
   fulfillment but current redirect-poll fulfillment already unlocks the pass.
 - SECURITY: user pasted an sk_live_ key into chat; advised to roll it immediately.
+
+## Payment webhook + buyer receipt email (session 2026-06)
+- POST /api/webhook/stripe: verifies signature when STRIPE_WEBHOOK_SECRET set (prod), else
+  parses JSON (preview). On checkout.session.completed+paid -> marks tx paid, calls
+  _fulfill_session. Verified end-to-end via simulated event: pass flips inactive->active;
+  re-sending the same event is idempotent (no double-grant).
+- _fulfill_session(session_id): shared idempotent helper (find_one_and_update guard) used by
+  BOTH the return-poll (/payments/status) and the webhook. Grants 365-day pass + sends receipt.
+- Buyer receipt: backend/email_util.py (Emergent-managed Resend, guardrail gate). EMAIL_FROM_NAME
+  = "Feed Withdrawal Timer". Sends once on fulfilment; failures are swallowed so they never block
+  the pass. Verified a real send id via delivered@resend.dev. Env read lazily (load_dotenv timing).
+- Go-live: user adds Stripe webhook endpoint https://<deployed>/api/webhook/stripe
+  (checkout.session.completed) and sets STRIPE_WEBHOOK_SECRET in deployment secrets. See
+  /app/GO_LIVE_CHECKLIST.md.

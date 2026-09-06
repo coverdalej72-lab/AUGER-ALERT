@@ -40,6 +40,17 @@ A simple, print-friendly checklist for switching your Feed Withdrawal Timer from
     - Note: this only changes the *deployed* app. Your preview keeps the test key, so
       you can keep testing safely.
 
+## Part 4b — Turn on the payment webhook (recommended, 2 minutes)
+This makes a buyer's pass unlock **even if they close the tab** right after paying.
+15. In Stripe Dashboard (Live mode) → **Developers → Webhooks → Add endpoint**.
+16. Endpoint URL: **`https://YOUR-DEPLOYED-LINK/api/webhook/stripe`**
+    (use your permanent deployed link from Part 3).
+17. Events to send: choose **`checkout.session.completed`**.
+18. Save, then copy that endpoint's **Signing secret** (starts `whsec_...`).
+19. Back in the Deployment **Secret settings**, add/set **`STRIPE_WEBHOOK_SECRET`** to
+    that `whsec_...` value. Save and **redeploy**.
+    - The app already handles this endpoint — you're just pointing Stripe at it.
+
 ## Part 5 — Test with ONE real payment
 15. Open your deployed link, create a fresh account, go to the paywall.
 16. Buy the A$29 season pass with a **real card** (charge yourself once).

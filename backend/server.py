@@ -25,6 +25,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
 from timing import compute_shed_timing, parse_time_value, parse_date_value, get_tz
+from email_util import send_email
 
 
 ROOT_DIR = Path(__file__).parent
@@ -39,6 +40,7 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:alerts@feedwithdrawal.app")
 
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "") or None
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-insecure-change-me")
 JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
@@ -1105,6 +1107,65 @@ def _norm_email(email: str) -> str:
     return (email or "").strip().lower()
 
 
+def _receipt_html(email: str, amount: float, currency: str, valid_until: str) -> str:
+    from html import escape
+    pretty_until = valid_until.split("T")[0] if valid_until else ""
+    amt = f"{currency.upper()} ${amount:.2f}"
+    return (
+        '<table role="presentation" width="100%" style="max-width:520px;margin:0 auto">'
+        '<tr><td style="padding:24px;font-family:Arial,Helvetica,sans-serif;color:#111">'
+        '<h2 style="margin:0 0 12px">You\'re in! 🎉</h2>'
+        f'<p style="margin:0 0 12px">Thanks for buying your Feed Withdrawal Timer season pass.</p>'
+        '<table role="presentation" width="100%" style="border-collapse:collapse;margin:12px 0">'
+        f'<tr><td style="padding:8px 0;color:#555">Account</td>'
+        f'<td style="padding:8px 0;text-align:right"><strong>{escape(email)}</strong></td></tr>'
+        f'<tr><td style="padding:8px 0;color:#555">Paid</td>'
+        f'<td style="padding:8px 0;text-align:right"><strong>{escape(amt)}</strong></td></tr>'
+        f'<tr><td style="padding:8px 0;color:#555">Access until</td>'
+        f'<td style="padding:8px 0;text-align:right"><strong>{escape(pretty_until)}</strong></td></tr>'
+        '</table>'
+        '<p style="margin:12px 0">Sign in with your account to open your private Control Centre.</p>'
+        '<p style="font-size:12px;color:#888;margin-top:24px">Sent by Feed Withdrawal Timer. '
+        'We never ask for your password or card details by email.</p>'
+        '</td></tr></table>'
+    )
+
+
+async def _fulfill_session(session_id: str) -> Optional[dict]:
+    """Idempotently mark a paid session fulfilled, grant the 1-year pass, and email
+    a receipt exactly once. Safe to call from both the return-poll and the webhook."""
+    claim = await db.payment_transactions.find_one_and_update(
+        {"session_id": session_id, "payment_status": "paid", "fulfilled": False},
+        {"$set": {"fulfilled": True, "fulfilled_at": iso_now()}},
+    )
+    if not claim:
+        return None
+    now = now_utc()
+    until = (now + timedelta(days=SEASON_PASS_DAYS)).replace(microsecond=0).isoformat()
+    await db.season_passes.update_one(
+        {"email": claim["email"]},
+        {"$set": {
+            "email": claim["email"],
+            "product": claim["product"],
+            "valid_from": now.replace(microsecond=0).isoformat(),
+            "valid_until": until,
+            "source_session_id": session_id,
+            "updated_at": iso_now(),
+        }, "$setOnInsert": {"created_at": iso_now()}},
+        upsert=True,
+    )
+    try:
+        await send_email(
+            to=claim["email"],
+            subject="Your Feed Withdrawal Timer season pass is active",
+            html=_receipt_html(claim["email"], claim.get("amount", 29.0),
+                               claim.get("currency", "aud"), until),
+        )
+    except Exception as exc:  # noqa: BLE001 — never let email break fulfilment
+        logger.warning("receipt email failed for %s: %s", claim["email"], exc)
+    return claim
+
+
 class CheckoutRequest(BaseModel):
     product: str = "season_pass"
     origin: Optional[str] = None
@@ -1176,25 +1237,7 @@ async def checkout_status(session_id: str):
     )
 
     if payment_status == "paid":
-        claim = await db.payment_transactions.find_one_and_update(
-            {"session_id": session_id, "payment_status": "paid", "fulfilled": False},
-            {"$set": {"fulfilled": True, "fulfilled_at": iso_now()}},
-        )
-        if claim:
-            now = now_utc()
-            until = now + timedelta(days=SEASON_PASS_DAYS)
-            await db.season_passes.update_one(
-                {"email": claim["email"]},
-                {"$set": {
-                    "email": claim["email"],
-                    "product": claim["product"],
-                    "valid_from": now.replace(microsecond=0).isoformat(),
-                    "valid_until": until.replace(microsecond=0).isoformat(),
-                    "source_session_id": session_id,
-                    "updated_at": iso_now(),
-                }, "$setOnInsert": {"created_at": iso_now()}},
-                upsert=True,
-            )
+        await _fulfill_session(session_id)
 
     return {"status": checkout_state, "payment_status": payment_status,
             "fulfilled": payment_status == "paid", "email": tx["email"]}
@@ -1207,6 +1250,29 @@ async def season_pass_status(owner: str = Depends(current_owner)):
         return {"active": False, "valid_until": None}
     active = parse_iso(doc["valid_until"]) > now_utc()
     return {"active": active, "valid_until": doc["valid_until"]}
+
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    """Stripe -> us. Unlocks the pass even if the buyer never returns to the app.
+    Verifies the signature when STRIPE_WEBHOOK_SECRET is set (production)."""
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+    checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_secret=STRIPE_WEBHOOK_SECRET)
+    try:
+        event = await checkout.handle_webhook(payload, signature)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("stripe webhook rejected: %s", exc)
+        raise HTTPException(400, "Invalid webhook.")
+
+    if event.session_id and (event.payment_status or "").lower() == "paid":
+        await db.payment_transactions.update_one(
+            {"session_id": event.session_id},
+            {"$set": {"payment_status": "paid", "updated_at": iso_now()}},
+        )
+        await _fulfill_session(event.session_id)
+    return {"received": True}
+
 
 
 # ---------------------------------------------------------------------------
