@@ -99,3 +99,15 @@ The grower (you). Acts on 1am/early-morning feed-withdrawal steps across multipl
 - Dashboard: Sign in -> (season pass check) -> Control Centre. 34/34 backend multi-tenant tests pass.
 - Accounts: doublebb@baqerifarming.com.au/DoubleB2026, demo@feedwithdrawal.app/demo123456.
 - Backlog: migrate 5 legacy test files to send Bearer tokens (harmless test debt).
+
+## Stripe verification (session 2026-06)
+- User's OWN sk_test_ key is connected in preview .env (STRIPE_API_KEY). Verified end-to-end at API level:
+  new buyer -> no pass -> POST /payments/checkout creates a REAL cs_test_ Stripe Checkout URL.
+- Private-account isolation re-verified: buyer B sees 0 of buyer A's schedules/recipients/pass;
+  no-token requests -> 401.
+- GO LIVE (do NOT do in preview): user rolls their sk_live_ key in Stripe, then on Deploy/Publish
+  sets STRIPE_API_KEY = sk_live_ in the deployment Secret settings (NOT in preview .env). success_url/
+  cancel_url auto-use the deployed origin (frontend sends window.origin). Live needs verified Stripe
+  account + payout set up. A live webhook (checkout.session.completed) is recommended for robust
+  fulfillment but current redirect-poll fulfillment already unlocks the pass.
+- SECURITY: user pasted an sk_live_ key into chat; advised to roll it immediately.
