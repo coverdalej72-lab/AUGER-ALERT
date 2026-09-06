@@ -1106,7 +1106,6 @@ def _norm_email(email: str) -> str:
 
 
 class CheckoutRequest(BaseModel):
-    email: str
     product: str = "season_pass"
     origin: Optional[str] = None
 
